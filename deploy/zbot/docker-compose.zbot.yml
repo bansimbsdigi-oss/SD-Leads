@@ -1,0 +1,54 @@
+# Override for the second Sabhi Leads copy on zbot.sabhidigital.com (Hostinger VPS, Traefik in front).
+# Use together with the base file, from /opt/sabhi-leads-zbot:
+#   docker compose -f docker-compose.yml -f deploy/zbot/docker-compose.zbot.yml <command>
+# Set COMPOSE_PROJECT_NAME and IMAGE_PREFIX in .env (see env.zbot.example) so nothing is shared
+# with the existing sabhi-leads-* stack.
+services:
+  app:
+    networks: [default, traefik-proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: traefik-proxy
+      traefik.http.routers.sabhileadszbot.rule: Host(`zbot.sabhidigital.com`)
+      traefik.http.routers.sabhileadszbot.entrypoints: websecure
+      traefik.http.routers.sabhileadszbot.tls: "true"
+      traefik.http.routers.sabhileadszbot.tls.certresolver: letsencrypt
+      traefik.http.services.sabhileadszbot.loadbalancer.server.port: "3000"
+    mem_limit: 768m
+
+  worker:
+    mem_limit: 512m
+
+  db:
+    # The base file sizes Postgres for the whole 8 GB machine; this box is shared with other apps.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - max_connections=60
+    mem_limit: 1g
+
+  redis:
+    mem_limit: 128m
+
+  # Traefik already owns ports 80/443 and terminates HTTPS, so the bundled Caddy must not start.
+  caddy:
+    profiles: [disabled]
+
+  # Needs deploy/rclone.conf (Backblaze B2) which does not exist on this box. Remove this block
+  # once you have it, or use the manual pg_dump in DEPLOY.md.
+  backup:
+    profiles: [disabled]
+
+networks:
+  traefik-proxy:
+    external: true
