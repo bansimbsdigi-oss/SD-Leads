@@ -219,20 +219,21 @@ export async function deleteLeads(ctx: Ctx, ids: string[]) {
     throw new NotFoundError("Lead not found");
   }
   const allowedIds = allowed.map((l) => l.id);
-  await prisma.$transaction(async (tx) => {
+  const removedCount = await prisma.$transaction(async (tx) => {
     // Leads flagged as duplicates of a deleted lead no longer point at it.
     await tx.lead.updateMany({ where: { duplicateOfId: { in: allowedIds } }, data: { duplicateOfId: null } });
     // RETURNING gives exactly the rows this transaction removed, so a concurrent delete of the
-    // same lead can't make the daily counts drop twice.
-    const removed = await tx.$queryRaw<{ clientId: string; lpId: string | null; createdAt: Date; isDuplicate: boolean }[]>`
+    // same lead can't make the daily counts drop twice or log it twice.
+    const removed = await tx.$queryRaw<{ id: string; clientId: string; lpId: string | null; createdAt: Date; isDuplicate: boolean }[]>`
       DELETE FROM leads WHERE id IN (${Prisma.join(allowedIds)})
-      RETURNING client_id AS "clientId", lp_id AS "lpId", created_at AS "createdAt", is_duplicate AS "isDuplicate"`;
+      RETURNING id, client_id AS "clientId", lp_id AS "lpId", created_at AS "createdAt", is_duplicate AS "isDuplicate"`;
     await adjustDailyCounts(tx, removed, -1);
     await tx.auditLog.createMany({
-      data: allowed.map((l) => ({ actorId: ctx.userId, clientId: l.clientId, action: "lead.delete", target: l.id })),
+      data: removed.map((l) => ({ actorId: ctx.userId, clientId: l.clientId, action: "lead.delete", target: l.id })),
     });
+    return removed.length;
   });
-  return { deleted: allowed.length, clientIds: [...new Set(allowed.map((l) => l.clientId))] };
+  return { deleted: removedCount, clientIds: [...new Set(allowed.map((l) => l.clientId))] };
 }
 
 export function listStages(ctx: Ctx, clientId: string) {

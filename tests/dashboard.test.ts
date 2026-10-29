@@ -66,8 +66,11 @@ describe("dashboard counts", () => {
     let d = await dashboardCounts(admin);
     expect([d.totals.allTime, d.totals.today, d.totals.duplicates]).toEqual([4, 4, 1]);
 
-    // Deleting the same leads twice at once only subtracts them once.
-    await Promise.all([deleteLeads(admin, ids.slice(0, 2)), deleteLeads(admin, ids.slice(0, 2)).catch(() => null)]);
+    // Deleting the same leads twice at once only subtracts them once. Either call may win the race;
+    // the other finds nothing left and reports "not found".
+    const results = await Promise.allSettled([deleteLeads(admin, ids.slice(0, 2)), deleteLeads(admin, ids.slice(0, 2))]);
+    const deleted = results.map((r) => (r.status === "fulfilled" ? r.value.deleted : 0));
+    expect(deleted.reduce((a, b) => a + b, 0)).toBe(2);
     d = await dashboardCounts(admin);
     expect(d.totals.allTime).toBe(2);
     expect(await prisma.lead.count()).toBe(2);
