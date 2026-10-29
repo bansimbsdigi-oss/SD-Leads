@@ -1,0 +1,95 @@
+# Production / staging stack on the VPS. Local dev uses `pnpm db:start` + `pnpm dev` instead.
+services:
+  app:
+    image: ${IMAGE_PREFIX:-sabhi-leads}-app:${IMAGE_TAG:-latest}
+    build: { context: ., target: app }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER:-sabhi_app}:${POSTGRES_APP_PASSWORD}@db:5432/sabhi_leads?connection_limit=15&pool_timeout=20
+      REDIS_URL: redis://redis:6379
+    depends_on: [db, redis]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    image: ${IMAGE_PREFIX:-sabhi-leads}-worker:${IMAGE_TAG:-latest}
+    build: { context: ., target: worker }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER:-sabhi_app}:${POSTGRES_APP_PASSWORD}@db:5432/sabhi_leads?connection_limit=5&pool_timeout=20
+      # Migrations run as the owner role: docker compose run --rm -e DATABASE_URL=$MIGRATE_URL worker node_modules/.bin/prisma migrate deploy
+      MIGRATE_URL: postgresql://${POSTGRES_USER:-sabhi}:${POSTGRES_PASSWORD}@db:5432/sabhi_leads
+      REDIS_URL: redis://redis:6379
+    depends_on: [db, redis]
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    # Sized for a Hostinger KVM 2 (2 vCPU, 8 GB RAM, NVMe). Postgres defaults assume 128 MB of RAM.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=5GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - max_connections=60
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sabhi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: sabhi_leads
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/db-init.sh:/docker-entrypoint-initdb.d/10-app-user.sh:ro
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      INGEST_DOMAIN: ${INGEST_DOMAIN}
+    depends_on: [app]
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-sabhi}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: sabhi_leads
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE}
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-b2:sabhi-backups/leads}
+    volumes:
+      - ./deploy/backup.sh:/backup.sh:ro
+      - ./deploy/rclone.conf:/config/rclone/rclone.conf:ro
+      - backups:/backups
+    depends_on: [db]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  backups:

@@ -1,0 +1,59 @@
+{
+  "name": "sabhi-leads",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "worker": "tsx src/worker/index.ts",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:start": "node scripts/dev-db.mjs",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "6.3.1",
+    "@prisma/client": "6.19.3",
+    "@tanstack/react-table": "8.21.3",
+    "argon2": "0.45.1",
+    "bullmq": "5.81.5",
+    "ioredis": "5.11.1",
+    "libphonenumber-js": "1.13.15",
+    "lucide-react": "0.577.0",
+    "next": "15.5.28",
+    "next-auth": "5.0.0-beta.32",
+    "pino": "10.4.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "web-push": "3.6.7",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
+    "embedded-postgres": "16.14.0-beta.17",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.28",
+    "prisma": "6.19.3",
+    "tailwindcss": "^4",
+    "tsx": "4.23.15",
+    "typescript": "^5",
+    "vitest": "3.2.7"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=22"
+  }
+}

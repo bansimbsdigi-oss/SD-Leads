@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demo LP · Webinar Jan 2027</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; color: #1e293b; }
+    label { display: block; margin: 12px 0 4px; font-size: 14px; }
+    input[type=text], input[type=tel], input[type=email], select { width: 100%; padding: 8px; font-size: 15px; box-sizing: border-box; }
+    fieldset { margin-top: 16px; border: 1px solid #cbd5e1; border-radius: 6px; }
+    fieldset label { display: inline-flex; gap: 6px; margin-right: 12px; }
+    button { margin-top: 20px; padding: 10px 18px; font-size: 15px; background: #1f5fd6; color: #fff; border: 0; border-radius: 6px; }
+    #thanks { padding: 16px; background: #dcfce7; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Free webinar: Grow on Instagram</h1>
+  <p>Local test page for the lead.js snippet (client <code>ritu-agarwal</code>, LP <code>webinar-jan-2027</code>).</p>
+
+  <form data-lead-form>
+    <label for="name">Your name</label>
+    <input id="name" type="text" name="name" data-role="name" required>
+
+    <label for="phone">Mobile</label>
+    <input id="phone" type="tel" name="phone" data-role="phone" required>
+
+    <label for="email">Email</label>
+    <input id="email" type="email" name="email" data-role="email">
+
+    <label for="city">City</label>
+    <input id="city" type="text" name="city">
+
+    <fieldset>
+      <legend>How often do you post?</legend>
+      <label><input type="radio" name="q1" value="never" data-score="0" required> Never</label>
+      <label><input type="radio" name="q1" value="weekly" data-score="2"> Weekly</label>
+      <label><input type="radio" name="q1" value="daily" data-score="3"> Daily</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Which platforms do you use?</legend>
+      <label><input type="checkbox" name="platforms" value="ig"> Instagram</label>
+      <label><input type="checkbox" name="platforms" value="yt"> YouTube</label>
+      <label><input type="checkbox" name="platforms" value="li"> LinkedIn</label>
+    </fieldset>
+
+    <label for="budget">Budget</label>
+    <select id="budget" name="budget">
+      <option value="">Choose…</option>
+      <option>&lt;1L</option><option>1-5L</option><option>5L+</option>
+    </select>
+
+    <label><input type="checkbox" name="consent" data-consent="I agree to be contacted" required> I agree to be contacted</label>
+    <button type="submit">Register</button>
+  </form>
+  <div id="thanks" data-lead-thanks hidden>Thanks! You're registered.</div>
+
+  <script src="/lead.js" data-client="ritu-agarwal" data-lp="webinar-jan-2027" defer></script>
+</body>
+</html>

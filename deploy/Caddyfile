@@ -1,0 +1,22 @@
+{$APP_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	reverse_proxy app:3000
+}
+
+# Public ingest host: only lead.js and the ingest API are exposed here.
+{$INGEST_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	request_body /api/ingest/* {
+		max_size 256KB
+	}
+	request_body /api/hook/* {
+		max_size 256KB
+	}
+	@allowed path /lead.js /api/ingest/* /api/hook/* /api/health
+	handle @allowed {
+		reverse_proxy app:3000
+	}
+	respond 404
+}

@@ -1,0 +1,311 @@
+// Sabhi Lead Platform data model. See docs/PLAN.md section 5.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ACCOUNT_MANAGER
+  CLIENT_ADMIN
+  CLIENT_MEMBER
+}
+
+enum ActiveStatus {
+  active
+  disabled
+}
+
+enum LpStatus {
+  active
+  paused
+}
+
+enum FieldRole {
+  name
+  phone
+  email
+}
+
+enum LeadEventType {
+  created
+  duplicate_of
+  status_changed
+  note
+  assigned
+  call
+  whatsapp
+  follow_up_set
+  meta_sent
+}
+
+enum IntegrationType {
+  meta
+  whatsapp
+  webhook
+}
+
+model Client {
+  id           String       @id @default(cuid())
+  name         String
+  slug         String       @unique
+  status       ActiveStatus @default(active)
+  /// Secret in the client's single webhook URL: /api/hook/{webhookToken}
+  webhookToken String       @unique @map("webhook_token")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  users          User[]
+  landingPages   LandingPage[]
+  leads          Lead[]
+  pipelineStages PipelineStage[]
+  integrations   Integration[]
+  managers       ClientManager[]
+  dailyCounts    LeadDailyCount[]
+
+  @@map("clients")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  clientId     String?      @map("client_id")
+  name         String
+  email        String       @unique
+  passwordHash String       @map("password_hash")
+  role         Role
+  status       ActiveStatus @default(active)
+  lastLoginAt  DateTime?    @map("last_login_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  client         Client?         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lpAccess       UserLpAccess[]
+  managedClients ClientManager[]
+  ownedLeads     Lead[]          @relation("LeadOwner")
+  events         LeadEvent[]
+
+  @@index([clientId])
+  @@map("users")
+}
+
+// Account managers (Sabhi staff) are assigned to specific clients.
+model ClientManager {
+  userId   String @map("user_id")
+  clientId String @map("client_id")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@id([userId, clientId])
+  @@map("client_managers")
+}
+
+model UserLpAccess {
+  userId String @map("user_id")
+  lpId   String @map("lp_id")
+
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lp   LandingPage @relation(fields: [lpId], references: [id], onDelete: Cascade)
+
+  @@id([userId, lpId])
+  @@map("user_lp_access")
+}
+
+model LandingPage {
+  id                 String   @id @default(cuid())
+  clientId           String   @map("client_id")
+  name               String
+  lpKey              String   @unique @map("lp_key")
+  allowedDomains     String[] @map("allowed_domains")
+  status             LpStatus @default(active)
+  currentFormVersion String?  @map("current_form_version")
+  /// How the client webhook recognises this LP: "host/path" of the page, or "form:<name>".
+  sourceKey          String?  @map("source_key")
+  sourceUrl          String?  @map("source_url")
+  autoCreated        Boolean  @default(false) @map("auto_created")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  client       Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  fields       FormField[]
+  formVersions FormVersion[]
+  leads        Lead[]
+  userAccess   UserLpAccess[]
+
+  @@unique([clientId, sourceKey])
+  @@index([clientId])
+  @@map("landing_pages")
+}
+
+model FormField {
+  id           String     @id @default(cuid())
+  lpId         String     @map("lp_id")
+  fieldKey     String     @map("field_key")
+  label        String // latest label sent by the form
+  displayLabel String?    @map("display_label") // admin rename, wins over label
+  inputType    String     @map("input_type")
+  options      Json?
+  role         FieldRole?
+  isHidden     Boolean    @default(false) @map("is_hidden")
+  position     Int        @default(0)
+  firstSeenAt  DateTime   @default(now()) @map("first_seen_at")
+  lastSeenAt   DateTime   @default(now()) @map("last_seen_at")
+
+  lp LandingPage @relation(fields: [lpId], references: [id], onDelete: Cascade)
+
+  @@unique([lpId, fieldKey])
+  @@map("form_fields")
+}
+
+model FormVersion {
+  id          String   @id @default(cuid())
+  lpId        String   @map("lp_id")
+  versionHash String   @map("version_hash")
+  fieldKeys   String[] @map("field_keys")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  lp    LandingPage @relation(fields: [lpId], references: [id], onDelete: Cascade)
+  leads Lead[]
+
+  @@unique([lpId, versionHash])
+  @@map("form_versions")
+}
+
+model Lead {
+  id              String    @id @default(cuid())
+  clientId        String    @map("client_id")
+  lpId            String?   @map("lp_id")
+  formVersionId   String?   @map("form_version_id")
+  statusId        String?   @map("status_id")
+  ownerId         String?   @map("owner_id")
+  submissionId    String    @map("submission_id")
+  name            String?
+  phoneNormalised String?   @map("phone_normalised")
+  emailNormalised String?   @map("email_normalised")
+  answers         Json      @default("{}")
+  tracking        Json      @default("{}")
+  consent         Json      @default("{}")
+  scores          Json      @default("{}") // quiz points per field_key
+  totalScore      Int?      @map("total_score")
+  /// Lowercased name, email, phone and answer values; trigram-indexed for fast search.
+  searchText      String?   @map("search_text")
+  source          String    @default("lp")
+  isDuplicate     Boolean   @default(false) @map("is_duplicate")
+  duplicateOfId   String?   @map("duplicate_of_id")
+  followUpAt      DateTime? @map("follow_up_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  lastActivityAt  DateTime  @default(now()) @map("last_activity_at")
+
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lp          LandingPage?       @relation(fields: [lpId], references: [id], onDelete: SetNull)
+  formVersion FormVersion?       @relation(fields: [formVersionId], references: [id], onDelete: SetNull)
+  status      PipelineStage?     @relation(fields: [statusId], references: [id], onDelete: SetNull)
+  owner       User?              @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  events      LeadEvent[]
+  deliveries  OutboundDelivery[]
+
+  @@unique([lpId, submissionId])
+  @@index([clientId, createdAt])
+  @@index([lpId, createdAt])
+  @@index([createdAt]) // "All clients" view, newest first
+  @@index([clientId, phoneNormalised]) // dedupe stays inside one client
+  @@index([clientId, emailNormalised])
+  @@index([clientId, statusId])
+  @@index([clientId, ownerId])
+  @@index([duplicateOfId])
+  @@index([answers(ops: JsonbPathOps)], type: Gin)
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin, map: "leads_search_text_trgm_idx")
+  @@map("leads")
+}
+
+/// Leads per landing page per day (India time), kept in step with `leads` by ingest and delete,
+/// so the dashboard sums a few hundred rows instead of counting millions. Rebuild with
+/// rebuildDailyCounts() (src/lib/dashboard.ts) if leads are ever changed outside the app.
+model LeadDailyCount {
+  clientId   String   @map("client_id")
+  lpId       String   @default("") @map("lp_id") // "" = no landing page
+  day        DateTime @db.Date
+  leads      Int      @default(0)
+  duplicates Int      @default(0)
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@id([clientId, lpId, day])
+  @@index([day])
+  @@map("lead_daily_counts")
+}
+
+model PipelineStage {
+  id            String  @id @default(cuid())
+  clientId      String  @map("client_id")
+  name          String
+  position      Int
+  isWon         Boolean @default(false) @map("is_won")
+  isLost        Boolean @default(false) @map("is_lost")
+  metaEventName String? @map("meta_event_name")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  leads  Lead[]
+
+  @@index([clientId, position])
+  @@map("pipeline_stages")
+}
+
+model LeadEvent {
+  id        String        @id @default(cuid())
+  leadId    String        @map("lead_id")
+  type      LeadEventType
+  payload   Json          @default("{}")
+  actorId   String?       @map("actor_id")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  lead  Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
+  @@map("lead_events")
+}
+
+model Integration {
+  id       String          @id @default(cuid())
+  clientId String          @map("client_id")
+  type     IntegrationType
+  config   String // AES-256-GCM encrypted JSON
+  status   String          @default("active")
+
+  client     Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  deliveries OutboundDelivery[]
+
+  @@map("integrations")
+}
+
+model OutboundDelivery {
+  id            String   @id @default(cuid())
+  leadId        String   @map("lead_id")
+  integrationId String   @map("integration_id")
+  attempt       Int      @default(1)
+  status        String
+  responseCode  Int?     @map("response_code")
+  error         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  lead        Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@map("outbound_deliveries")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?  @map("actor_id")
+  clientId  String?  @map("client_id")
+  action    String
+  target    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([clientId, createdAt])
+  @@map("audit_log")
+}
