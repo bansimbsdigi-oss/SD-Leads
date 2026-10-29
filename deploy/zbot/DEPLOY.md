@@ -70,8 +70,6 @@ ssh root@187.127.153.240 "cd /opt/zoombot && docker compose down"
 
 ## 5. Start the new copy
 
-Shorthand used below: `DC="docker compose -f docker-compose.yml -f deploy/zbot/docker-compose.zbot.yml"`
-
 ```bash
 ssh root@187.127.153.240 "cd /opt/sabhi-leads-zbot && docker compose -f docker-compose.yml -f deploy/zbot/docker-compose.zbot.yml up -d db redis"
 ```
@@ -98,7 +96,7 @@ ssh root@187.127.153.240
 cd /opt/sabhi-leads-zbot
 read -rsp "Admin password (12+ chars): " P; echo
 docker compose -f docker-compose.yml -f deploy/zbot/docker-compose.zbot.yml run --rm \
-  -e DATABASE_URL='' -e ADMIN_EMAIL=aditya@sabhidigital.com -e ADMIN_NAME="Aditya" -e ADMIN_PASSWORD="$P" \
+  -e ADMIN_EMAIL=aditya@sabhidigital.com -e ADMIN_NAME="Aditya" -e ADMIN_PASSWORD="$P" \
   worker sh -c 'DATABASE_URL=$MIGRATE_URL node_modules/.bin/tsx scripts/create-admin.ts'
 unset P
 ```
