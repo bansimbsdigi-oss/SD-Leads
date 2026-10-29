@@ -1,5 +1,10 @@
 allowBuilds:
+  # Embedded Postgres is only for local dev on a Mac (pnpm db:start). CI and Docker use a real
+  # Postgres server, so the Linux builds of it are explicitly not run.
   '@embedded-postgres/darwin-arm64': true
+  '@embedded-postgres/darwin-x64': true
+  '@embedded-postgres/linux-x64': false
+  '@embedded-postgres/linux-arm64': false
   '@prisma/client': true
   '@prisma/engines': true
   argon2: true
