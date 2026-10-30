@@ -126,7 +126,7 @@ docker compose run --rm worker sh -c 'DATABASE_URL=$MIGRATE_URL node_modules/.bi
 docker compose up -d
 ```
 
-- First admin / password reset: `docker compose run --rm worker node_modules/.bin/tsx scripts/create-admin.ts you@example.com "Name"` prints a new password.
+- First admin / password reset: `docker compose run --rm worker node_modules/.bin/tsx scripts/create-admin.ts you@example.com "Name"` prints a new password. To choose the password instead, add `-e ADMIN_PASSWORD='...'` after `--rm`.
 - Backups: `deploy/backup-local.sh` runs nightly from root's crontab and keeps 14 dumps in `/root/backups/sd-leads`.
 - On a dedicated server instead, leave `COMPOSE_FILE` unset: the base file includes Caddy on 80/443.
 
