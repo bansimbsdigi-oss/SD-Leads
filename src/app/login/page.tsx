@@ -1,8 +1,6 @@
 import { Inbox, Filter, Webhook } from "lucide-react";
 import { redirect } from "next/navigation";
-import { loginAction } from "@/app/actions";
-import { ActionForm } from "@/components/ActionForm";
-import { Button, Input, Label } from "@/components/ui";
+import { LoginForm } from "@/components/LoginForm";
 import { getCtx } from "@/lib/session";
 
 const POINTS = [
@@ -14,7 +12,7 @@ const POINTS = [
 export default async function LoginPage() {
   if (await getCtx()) redirect("/");
   return (
-    <main className="grid min-h-screen lg:grid-cols-[1fr_520px]">
+    <main className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(480px,42%)]">
       <section className="relative hidden overflow-hidden bg-brand-900 p-12 text-white lg:flex lg:flex-col lg:justify-between">
         <div className="flex items-center gap-2.5">
           <span aria-hidden className="flex size-9 items-center justify-center rounded-lg bg-white/10 text-base font-bold">S</span>
@@ -35,25 +33,18 @@ export default async function LoginPage() {
         <div aria-hidden className="absolute -right-24 -top-24 size-96 rounded-full bg-brand-700/40 blur-3xl" />
       </section>
 
-      <section className="flex items-center justify-center px-4 py-12 sm:px-8">
-        <div className="w-full max-w-sm">
+      <section className="flex items-center justify-center bg-canvas px-4 py-12 sm:px-8">
+        <div className="w-full max-w-[400px]">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <span aria-hidden className="flex size-9 items-center justify-center rounded-lg bg-brand-700 text-base font-bold text-white">S</span>
             <span className="text-lg font-semibold">Sabhi Leads</span>
           </div>
-          <h2 className="text-2xl font-semibold tracking-tight">Sign in</h2>
-          <p className="mb-6 mt-1 text-sm text-ink-muted">Use the email your Sabhi account manager set up for you.</p>
-          <ActionForm action={loginAction} className="space-y-4">
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" autoComplete="email" required className="h-10" />
-            </div>
-            <div>
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" name="password" type="password" autoComplete="current-password" required className="h-10" />
-            </div>
-            <Button type="submit" className="h-10 w-full">Sign in</Button>
-          </ActionForm>
+          <div className="rounded-2xl border border-line bg-surface p-6 shadow-[0_1px_3px_rgba(15,23,42,0.06),0_8px_24px_rgba(15,23,42,0.06)] sm:p-8">
+            <h2 className="text-2xl font-semibold tracking-tight">Welcome back</h2>
+            <p className="mb-7 mt-1.5 text-sm text-ink-muted">Sign in with the email your Sabhi account manager set up for you.</p>
+            <LoginForm />
+          </div>
+          <p className="mt-6 text-center text-xs text-ink-muted">Trouble signing in? Ask your Sabhi account manager to reset your password.</p>
         </div>
       </section>
     </main>

@@ -45,6 +45,16 @@ label:has(input[type="checkbox"]) {
   cursor: pointer;
 }
 
+/* Chrome paints autofilled fields light blue; keep them on the normal field colours. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--color-surface) inset;
+  -webkit-text-fill-color: var(--color-ink);
+  caret-color: var(--color-ink);
+  transition: background-color 9999s ease-out 0s;
+}
+
 dialog[open] {
   animation: dialog-in 160ms ease-out;
 }
