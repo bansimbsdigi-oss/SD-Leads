@@ -5,10 +5,10 @@ import { ActionForm } from "@/components/ActionForm";
 import { CopyBox } from "@/components/CopyBox";
 import { DeleteClientDialog } from "@/components/DeleteClientDialog";
 import { EditLpDialog } from "@/components/EditLpDialog";
-import { Avatar, Badge, Button, buttonClass, Card, Empty, Hint, Input, Label, PageHeader, stageTone, tableClass } from "@/components/ui";
+import { Avatar, Badge, Button, buttonClass, Card, Empty, Hint, Input, Label, PageHeader, tableClass } from "@/components/ui";
 import { UserForm } from "@/components/UserForm";
 import { WebhooksCard } from "@/components/WebhooksCard";
-import { getClient, listLps, listStages, listUsers } from "@/lib/data";
+import { getClient, listLps, listUsers } from "@/lib/data";
 import { leadFieldDefs, toFieldMeta } from "@/lib/leadQuery";
 import { listWebhookRules } from "@/lib/outbound/webhooks";
 import { formatDateTime } from "@/lib/leadColumns";
@@ -21,9 +21,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   const client = await orNotFound(getClient(ctx, id));
   const canManageUsers = can.manageUsers(ctx, client.id);
   const canManageLps = can.manageLps(ctx, client.id);
-  const [lps, stages, users, webhooks, fieldDefs] = await Promise.all([
+  const [lps, users, webhooks, fieldDefs] = await Promise.all([
     listLps(ctx, client.id),
-    listStages(ctx, client.id),
     canManageUsers ? listUsers(ctx, client.id) : Promise.resolve([]),
     canManageLps ? listWebhookRules(ctx, client.id) : Promise.resolve([]),
     canManageLps ? leadFieldDefs(ctx, { clientId: client.id }) : Promise.resolve([]),
@@ -44,18 +43,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         crumbs={isSabhiStaff(ctx) ? [{ label: "Clients", href: "/clients" }, { label: client.name }] : undefined}
         icon={<Avatar name={client.name} size="lg" />}
         title={client.name}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-1.5">
-            <code className="font-mono text-xs">{client.slug}</code>
-            <span aria-hidden className="mx-1 text-slate-300">·</span>
-            {stages.map((s, i) => (
-              <span key={s.id} className="flex items-center gap-1.5">
-                {i > 0 && <ArrowRight aria-hidden className="size-3 text-slate-300" />}
-                <Badge tone={stageTone(s.name)}>{s.name}</Badge>
-              </span>
-            ))}
-          </span>
-        }
+        subtitle={<code className="font-mono text-xs">{client.slug}</code>}
         actions={
           <Link href={`/leads?client=${client.id}`} className={buttonClass("primary", "sm")}>
             View leads <ArrowRight aria-hidden />
