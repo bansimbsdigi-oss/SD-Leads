@@ -7,7 +7,7 @@ import { z } from "zod";
 import { Prisma, type Role } from "@prisma/client";
 import { signIn, signOut } from "@/auth";
 import { prisma } from "@/lib/db";
-import { audit, createClient, createLp, createUser, deleteLeads, getLp, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
+import { audit, createClient, createLp, createUser, deleteClient, deleteLeads, getLp, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
 import { requireCtx } from "@/lib/session";
 import type { Condition } from "@/lib/leadFilterSpec";
 import {
@@ -225,4 +225,16 @@ export async function retryDeliveryAction(fd: FormData) {
   const ctx = await requireCtx();
   await retryDelivery(ctx, str(fd, "id"));
   revalidatePath(`/clients/${str(fd, "clientId")}`);
+}
+
+export async function deleteClientAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  try {
+    await deleteClient(ctx, str(fd, "id"), str(fd, "confirmName"));
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  redirect("/clients");
 }

@@ -61,6 +61,30 @@ export async function createClient(ctx: Ctx, input: { name: string; slug?: strin
   return client;
 }
 
+const DELETE_BATCH = 5000;
+
+/**
+ * Permanently deletes a client and everything under it (landing pages, leads, users, webhooks, totals).
+ * Super admin only; the caller must type the client's name. The client is disabled first so no new
+ * leads arrive, then leads go in batches (a single huge delete could hit the statement timeout).
+ */
+export async function deleteClient(ctx: Ctx, id: string, typedName: string) {
+  if (!can.manageClients(ctx)) throw new ForbiddenError();
+  const client = await getClient(ctx, id);
+  if (typedName.trim().toLowerCase() !== client.name.trim().toLowerCase()) {
+    throw new Error(`Type the client's name exactly (“${client.name}”) to confirm.`);
+  }
+  const leadCount = await prisma.lead.count({ where: { clientId: id } });
+  await prisma.client.update({ where: { id }, data: { status: "disabled" } });
+  for (;;) {
+    const n = await prisma.$executeRaw`DELETE FROM leads WHERE id IN (SELECT id FROM leads WHERE client_id = ${id} LIMIT ${DELETE_BATCH})`;
+    if (n < DELETE_BATCH) break;
+  }
+  await prisma.client.delete({ where: { id } }); // cascades to LPs, users, stages, webhooks, daily totals
+  await audit(ctx, "client.delete", `${client.name} (${client.slug}) · ${leadCount} leads`, id);
+  return { name: client.name, leadCount };
+}
+
 /** Issues a new webhook URL; the old one stops working immediately. */
 export async function rotateWebhookToken(ctx: Ctx, clientId: string) {
   await getClient(ctx, clientId);

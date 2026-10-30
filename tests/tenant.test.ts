@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { createClient, createLp, createUser, deleteLeads, getClient, getLead, getLp, listClients, listLeads, listLps } from "@/lib/data";
+import { createClient, createLp, createUser, deleteClient, deleteLeads, getClient, getLead, getLp, listClients, listLeads, listLps } from "@/lib/data";
 import { ingestPayloadSchema } from "@/lib/ingest/schema";
 import { ingestLead } from "@/lib/ingest/service";
 import { ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -97,5 +97,40 @@ describe("lead deletion", () => {
     await deleteLeads(await makeUser("SUPER_ADMIN", null), [first]);
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: dupe } })).duplicateOfId).toBeNull();
     expect(await prisma.lead.count({ where: { clientId: client.id } })).toBe(1);
+  });
+});
+
+describe("client deletion", () => {
+  beforeEach(resetDb);
+
+  it("only super admins can delete, and only with the client's name typed", async () => {
+    const a = await makeClient("alpha");
+    const clientAdmin = await makeUser("CLIENT_ADMIN", a.client.id);
+    const am = await makeUser("ACCOUNT_MANAGER", null, { managedClientIds: [a.client.id] });
+    await expect(deleteClient(clientAdmin, a.client.id, "alpha")).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(deleteClient(am, a.client.id, "alpha")).rejects.toBeInstanceOf(ForbiddenError);
+    const admin = await makeUser("SUPER_ADMIN", null);
+    await expect(deleteClient(admin, a.client.id, "alph")).rejects.toThrow(/Type the client's name/);
+    expect(await prisma.client.count({ where: { id: a.client.id } })).toBe(1);
+  });
+
+  it("removes the client and everything under it, and nothing of other clients", async () => {
+    const a = await makeClient("alpha");
+    const b = await makeClient("beta");
+    await ingestLead(a.lp, ingestPayloadSchema.parse(payload()));
+    await ingestLead(a.lp, ingestPayloadSchema.parse(payload()));
+    await ingestLead(b.lp, ingestPayloadSchema.parse(payload()));
+    await makeUser("CLIENT_ADMIN", a.client.id);
+    const admin = await makeUser("SUPER_ADMIN", null);
+
+    const res = await deleteClient(admin, a.client.id, " ALPHA ");
+    expect(res).toEqual({ name: "alpha", leadCount: 2 });
+    expect(await prisma.client.count({ where: { id: a.client.id } })).toBe(0);
+    expect(await prisma.lead.count({ where: { clientId: a.client.id } })).toBe(0);
+    expect(await prisma.landingPage.count({ where: { clientId: a.client.id } })).toBe(0);
+    expect(await prisma.user.count({ where: { clientId: a.client.id } })).toBe(0);
+    expect(await prisma.leadDailyCount.count({ where: { clientId: a.client.id } })).toBe(0);
+    expect(await prisma.lead.count({ where: { clientId: b.client.id } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { action: "client.delete" } })).toBe(1);
   });
 });

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createLpAction, rotateWebhookAction } from "@/app/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { CopyBox } from "@/components/CopyBox";
+import { DeleteClientDialog } from "@/components/DeleteClientDialog";
 import { EditLpDialog } from "@/components/EditLpDialog";
 import { Avatar, Badge, Button, buttonClass, Card, Empty, Hint, Input, Label, PageHeader, stageTone, tableClass } from "@/components/ui";
 import { UserForm } from "@/components/UserForm";
@@ -175,6 +176,22 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                 </div>
               )}
             </Card>
+          )}
+
+          {can.manageClients(ctx) && (
+            <section className="rounded-xl border border-red-200 bg-surface">
+              <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-red-700">Danger zone</h2>
+                  <p className="mt-0.5 text-xs text-ink-muted">Delete this client and all of its landing pages, leads, logins and webhooks.</p>
+                </div>
+                <DeleteClientDialog
+                  id={client.id}
+                  name={client.name}
+                  counts={{ landingPages: lps.length, leads: leadCount, users: users.length, webhooks: webhooks.length }}
+                />
+              </div>
+            </section>
           )}
         </div>
 

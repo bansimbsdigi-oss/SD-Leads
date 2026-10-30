@@ -11,6 +11,8 @@ export default defineConfig({
       REDIS_URL: "",
       TURNSTILE_SECRET_KEY: "",
       LOG_LEVEL: "silent",
+      // Tests call job handlers directly; a local .env with INLINE_JOBS=1 must not fire them in the background.
+      INLINE_JOBS: "0",
       ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000",
     },
     fileParallelism: false,
