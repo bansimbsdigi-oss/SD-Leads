@@ -1,11 +1,10 @@
 import { ArrowRight, FileText, RefreshCw, UserPlus, Users, Webhook } from "lucide-react";
 import Link from "next/link";
-import { createLpAction, rotateWebhookAction } from "@/app/actions";
-import { ActionForm } from "@/components/ActionForm";
+import { rotateWebhookAction } from "@/app/actions";
 import { CopyBox } from "@/components/CopyBox";
 import { DeleteClientDialog } from "@/components/DeleteClientDialog";
 import { EditLpDialog } from "@/components/EditLpDialog";
-import { Avatar, Badge, Button, buttonClass, Card, Empty, Hint, Input, Label, PageHeader, tableClass } from "@/components/ui";
+import { Avatar, Badge, Button, buttonClass, Card, Empty, PageHeader, tableClass } from "@/components/ui";
 import { UserForm } from "@/components/UserForm";
 import { WebhooksCard } from "@/components/WebhooksCard";
 import { getClient, listLps, listUsers } from "@/lib/data";
@@ -97,7 +96,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           <Card flush title="Landing pages" description={`${lps.length} page${lps.length === 1 ? "" : "s"}`}>
             {lps.length === 0 ? (
               <Empty icon={<FileText />} title="No landing pages yet">
-                Create one on the right, or send a lead to the webhook and it appears here automatically.
+                Send a lead to the client webhook above and its landing page appears here automatically.
               </Empty>
             ) : (
               <div className="overflow-x-auto">
@@ -184,25 +183,6 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         </div>
 
         <div className="space-y-6">
-          {canManageLps && (
-            <Card title="New landing page" description="For pages using the lead.js snippet.">
-              <ActionForm action={createLpAction} className="space-y-4">
-                <input type="hidden" name="clientId" value={client.id} />
-                <div><Label htmlFor="lp-name">Name</Label><Input id="lp-name" name="name" required placeholder="Webinar Jan 2027" /></div>
-                <div>
-                  <Label htmlFor="lp-domains">Allowed domains</Label>
-                  <Input id="lp-domains" name="domains" required placeholder="ritu.com, www.ritu.com" />
-                  <Hint>Only these sites can send leads through the snippet.</Hint>
-                </div>
-                <div>
-                  <Label htmlFor="lp-key">LP key</Label>
-                  <Input id="lp-key" name="lpKey" placeholder="Generated from the name" />
-                  <Hint>Optional. Can&apos;t be changed later.</Hint>
-                </div>
-                <Button type="submit" className="w-full">Create landing page</Button>
-              </ActionForm>
-            </Card>
-          )}
           {canManageUsers && (
             <Card title={<span className="flex items-center gap-2"><UserPlus aria-hidden className="size-4 text-brand-700" /> Add user</span>}>
               <UserForm
