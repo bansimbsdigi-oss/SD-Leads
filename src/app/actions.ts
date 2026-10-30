@@ -9,6 +9,15 @@ import { signIn, signOut } from "@/auth";
 import { prisma } from "@/lib/db";
 import { audit, createClient, createLp, createUser, deleteLeads, getLp, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
 import { requireCtx } from "@/lib/session";
+import type { Condition } from "@/lib/leadFilterSpec";
+import {
+  createWebhookRule,
+  deleteWebhookRule,
+  retryDelivery,
+  sendTestWebhook,
+  setWebhookStatus,
+  updateWebhookRule,
+} from "@/lib/outbound/webhooks";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
 
 export type ActionState = { error?: string; ok?: string } | undefined;
@@ -162,4 +171,58 @@ export async function deleteLeadsAction(fd: FormData) {
   const ctx = await requireCtx();
   await deleteLeads(ctx, fd.getAll("ids").map(String).filter(Boolean));
   revalidatePath("/leads");
+}
+
+// ---------- Outbound webhooks (send leads to Pabbly) ----------
+
+export async function saveWebhookAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  try {
+    let conditions: Condition[] = [];
+    try {
+      conditions = JSON.parse(str(fd, "conditions") || "[]");
+    } catch {
+      return { error: "The conditions couldn't be read. Please try again." };
+    }
+    const input = { name: str(fd, "name"), url: str(fd, "url"), conditions };
+    const id = str(fd, "id");
+    const clientId = str(fd, "clientId");
+    if (id) await updateWebhookRule(ctx, id, input);
+    else await createWebhookRule(ctx, clientId, input);
+    revalidatePath(`/clients/${clientId}`);
+    return { ok: id ? "Webhook saved." : "Webhook added. New leads that match will be sent to it." };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function toggleWebhookAction(fd: FormData) {
+  const ctx = await requireCtx();
+  await setWebhookStatus(ctx, str(fd, "id"), str(fd, "status") === "paused" ? "paused" : "active");
+  revalidatePath(`/clients/${str(fd, "clientId")}`);
+}
+
+export async function deleteWebhookAction(fd: FormData) {
+  const ctx = await requireCtx();
+  await deleteWebhookRule(ctx, str(fd, "id"));
+  revalidatePath(`/clients/${str(fd, "clientId")}`);
+}
+
+export async function testWebhookAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  try {
+    const r = await sendTestWebhook(ctx, str(fd, "id"));
+    const what = r.usedLead ? `the latest matching lead (${r.usedLead})` : "sample data (no recent lead matches the conditions)";
+    return r.ok
+      ? { ok: `Test sent with ${what}. The webhook answered ${r.status} in ${r.durationMs} ms.` }
+      : { error: `Test failed: ${r.error}. Check the URL in Pabbly and try again.` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function retryDeliveryAction(fd: FormData) {
+  const ctx = await requireCtx();
+  await retryDelivery(ctx, str(fd, "id"));
+  revalidatePath(`/clients/${str(fd, "clientId")}`);
 }

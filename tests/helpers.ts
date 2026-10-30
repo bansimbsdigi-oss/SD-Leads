@@ -6,7 +6,7 @@ import type { Role } from "@prisma/client";
 
 export async function resetDb() {
   await prisma.$executeRawUnsafe(
-    `TRUNCATE lead_daily_counts, clients, users, landing_pages, leads, form_fields, form_versions, lead_events, pipeline_stages, audit_log, client_managers, user_lp_access CASCADE`,
+    `TRUNCATE outbound_deliveries, integrations, lead_daily_counts, clients, users, landing_pages, leads, form_fields, form_versions, lead_events, pipeline_stages, audit_log, client_managers, user_lp_access CASCADE`,
   );
 }
 

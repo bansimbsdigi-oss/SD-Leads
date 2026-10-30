@@ -269,16 +269,23 @@ model LeadEvent {
   @@map("lead_events")
 }
 
+/// Outbound integrations. For type `webhook`: forwards matching new leads to a URL (e.g. Pabbly).
 model Integration {
-  id       String          @id @default(cuid())
-  clientId String          @map("client_id")
-  type     IntegrationType
-  config   String // AES-256-GCM encrypted JSON
-  status   String          @default("active")
+  id         String          @id @default(cuid())
+  clientId   String          @map("client_id")
+  type       IntegrationType
+  name       String          @default("")
+  config     String // AES-256-GCM encrypted JSON; webhook: { url }
+  /// Lead filter conditions (same shape as the leads screen); empty = every lead.
+  conditions Json            @default("[]")
+  status     String          @default("active") // active | paused
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @default(now()) @updatedAt @map("updated_at")
 
   client     Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
   deliveries OutboundDelivery[]
 
+  @@index([clientId, type])
   @@map("integrations")
 }
 
@@ -290,11 +297,14 @@ model OutboundDelivery {
   status        String
   responseCode  Int?     @map("response_code")
   error         String?
+  durationMs    Int?     @map("duration_ms")
   createdAt     DateTime @default(now()) @map("created_at")
 
   lead        Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
   integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
 
+  @@index([integrationId, createdAt])
+  @@index([leadId])
   @@map("outbound_deliveries")
 }
 

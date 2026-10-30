@@ -11,6 +11,7 @@ export default defineConfig({
       REDIS_URL: "",
       TURNSTILE_SECRET_KEY: "",
       LOG_LEVEL: "silent",
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000",
     },
     fileParallelism: false,
   },

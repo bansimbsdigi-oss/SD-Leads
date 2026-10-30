@@ -6,7 +6,10 @@ import { CopyBox } from "@/components/CopyBox";
 import { EditLpDialog } from "@/components/EditLpDialog";
 import { Avatar, Badge, Button, buttonClass, Card, Empty, Hint, Input, Label, PageHeader, stageTone, tableClass } from "@/components/ui";
 import { UserForm } from "@/components/UserForm";
+import { WebhooksCard } from "@/components/WebhooksCard";
 import { getClient, listLps, listStages, listUsers } from "@/lib/data";
+import { leadFieldDefs, toFieldMeta } from "@/lib/leadQuery";
+import { listWebhookRules } from "@/lib/outbound/webhooks";
 import { formatDateTime } from "@/lib/leadColumns";
 import { orNotFound, requireCtx } from "@/lib/session";
 import { can, isSabhiStaff } from "@/lib/tenant";
@@ -17,10 +20,12 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   const client = await orNotFound(getClient(ctx, id));
   const canManageUsers = can.manageUsers(ctx, client.id);
   const canManageLps = can.manageLps(ctx, client.id);
-  const [lps, stages, users] = await Promise.all([
+  const [lps, stages, users, webhooks, fieldDefs] = await Promise.all([
     listLps(ctx, client.id),
     listStages(ctx, client.id),
     canManageUsers ? listUsers(ctx, client.id) : Promise.resolve([]),
+    canManageLps ? listWebhookRules(ctx, client.id) : Promise.resolve([]),
+    canManageLps ? leadFieldDefs(ctx, { clientId: client.id }) : Promise.resolve([]),
   ]);
 
   const webhookUrl = `${(process.env.INGEST_URL || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/api/hook/${client.webhookToken}`;
@@ -138,6 +143,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               </div>
             )}
           </Card>
+
+          {canManageLps && <WebhooksCard clientId={client.id} rules={webhooks} fields={toFieldMeta(fieldDefs)} />}
 
           {canManageUsers && (
             <Card flush title="Users" description="People at this client who can log in.">

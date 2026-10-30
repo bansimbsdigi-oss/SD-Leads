@@ -404,3 +404,18 @@ export async function columnValues(ctx: Ctx, query: LeadQuery, defs: FieldDef[],
   }));
   return { values, truncated: rows.length > VALUES_LIMIT, sampled: (rows[0]?.sampled ?? 0) >= VALUES_SAMPLE };
 }
+
+/**
+ * Does one lead match a set of conditions? Used by outbound webhooks. Runs with system scope, limited
+ * to the lead's own client, so conditions on form fields resolve against that client's fields.
+ */
+export async function leadMatchesConditions(clientId: string, leadId: string, conditions: Condition[]): Promise<boolean> {
+  const system: Ctx = { userId: "system", role: "SUPER_ADMIN", clientId: null, managedClientIds: [], lpIds: [] };
+  const query: LeadQuery = { clientId, conditions, dir: "desc", page: 1, pageSize: 1 };
+  const defs = conditions.length ? await leadFieldDefs(system, { clientId }) : [];
+  const where = buildWhere(system, query, new Map(defs.map((d) => [d.id, d])));
+  const rows = await prisma.$queryRaw<{ ok: number }[]>(
+    Prisma.sql`SELECT 1 AS ok ${FROM_LEADS} WHERE l.id = ${leadId} AND ${where} LIMIT 1`,
+  );
+  return rows.length > 0;
+}

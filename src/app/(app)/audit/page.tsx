@@ -59,6 +59,12 @@ const ACTION_LABEL: Record<string, string> = {
   "field.update": "Field edited",
   "lead.delete": "Lead deleted",
   "leads.export": "Leads exported",
+  "user.password_reset": "Password reset",
+  "webhook.create": "Webhook added",
+  "webhook.update": "Webhook edited",
+  "webhook.active": "Webhook resumed",
+  "webhook.paused": "Webhook paused",
+  "webhook.delete": "Webhook deleted",
 };
 
-const AREA_TONE: Record<string, Tone> = { client: "blue", lp: "violet", user: "green", field: "slate", leads: "amber" };
+const AREA_TONE: Record<string, Tone> = { client: "blue", lp: "violet", user: "green", field: "slate", leads: "amber", webhook: "violet" };
