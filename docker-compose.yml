@@ -1,7 +1,12 @@
 # Production / staging stack on the VPS. Local dev uses `pnpm db:start` + `pnpm dev` instead.
+# On a server where another reverse proxy (Traefik) owns ports 80/443, also use
+# docker-compose.shared-host.yml (set COMPOSE_FILE in .env, see README).
+# A fixed project name keeps containers, volumes and images apart from other apps on the host.
+name: sd-leads
+
 services:
   app:
-    image: ${IMAGE_PREFIX:-sabhi-leads}-app:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-sd-leads}-app:${IMAGE_TAG:-latest}
     build: { context: ., target: app }
     env_file: .env
     environment:
@@ -16,7 +21,7 @@ services:
       retries: 3
 
   worker:
-    image: ${IMAGE_PREFIX:-sabhi-leads}-worker:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-sd-leads}-worker:${IMAGE_TAG:-latest}
     build: { context: ., target: worker }
     env_file: .env
     environment:
@@ -48,6 +53,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sabhi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: sabhi_leads
+      # Read by deploy/db-init.sh to create the least-privilege app role on first start.
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-sabhi_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/db-init.sh:/docker-entrypoint-initdb.d/10-app-user.sh:ro

@@ -110,9 +110,24 @@ docker-compose.yml, deploy/ VPS stack: app, worker, db, redis, caddy, backup
 
 ## Deploy (VPS)
 
-1. Copy `.env.example` to `.env` on the VPS and fill it in.
-2. `docker compose up -d db redis caddy`
-3. `docker compose build && docker compose run --rm worker sh -c 'DATABASE_URL=$MIGRATE_URL node_modules/.bin/prisma migrate deploy'`
-4. `docker compose up -d`
+Production runs at https://zbot.sabhidigital.com on the shared Hostinger VPS, in `/opt/sd-leads`
+(compose project `sd-leads`, so it never touches the other apps there). Traefik on that host owns
+ports 80/443 and issues the certificate, so the stack runs with `docker-compose.shared-host.yml`
+(no Caddy, memory limits, smaller Postgres). `.env` on the server sets
+`COMPOSE_FILE=docker-compose.yml:docker-compose.shared-host.yml`, so plain `docker compose` commands
+in that folder use both files.
+
+Update by hand:
+
+```bash
+cd /opt/sd-leads && git pull
+docker compose build app worker
+docker compose run --rm worker sh -c 'DATABASE_URL=$MIGRATE_URL node_modules/.bin/prisma migrate deploy'
+docker compose up -d
+```
+
+- First admin / password reset: `docker compose run --rm worker node_modules/.bin/tsx scripts/create-admin.ts you@example.com "Name"` prints a new password.
+- Backups: `deploy/backup-local.sh` runs nightly from root's crontab and keeps 14 dumps in `/root/backups/sd-leads`.
+- On a dedicated server instead, leave `COMPOSE_FILE` unset: the base file includes Caddy on 80/443.
 
 CI (`.github/workflows/ci.yml`) runs typecheck, lint, tests and build on every push, and deploys `main` over SSH.

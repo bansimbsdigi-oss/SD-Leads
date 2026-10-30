@@ -1,0 +1,45 @@
+# Overrides for a VPS shared with other apps, where Traefik already owns ports 80/443 and issues
+# certificates (resolver "letsencrypt"). Use with: COMPOSE_FILE=docker-compose.yml:docker-compose.shared-host.yml
+services:
+  app:
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.sdleads.rule: "Host(`${APP_DOMAIN}`)"
+      traefik.http.routers.sdleads.entrypoints: websecure
+      traefik.http.routers.sdleads.tls.certresolver: letsencrypt
+      traefik.http.services.sdleads.loadbalancer.server.port: "3000"
+    # Memory caps keep this stack from starving the other apps on the host.
+    mem_limit: 768m
+
+  worker:
+    mem_limit: 512m
+
+  db:
+    # Sized for a share of an 8 GB host, not the whole machine.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - max_connections=40
+    mem_limit: 1g
+
+  redis:
+    # BullMQ needs noeviction; the cap stops a runaway queue from eating host memory.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    mem_limit: 192m
+
+  # Traefik replaces Caddy here, and backups run from cron (deploy/backup-local.sh) until off-site
+  # storage is configured. Profiles keep both out of a plain `docker compose up`.
+  caddy:
+    profiles: ["dedicated-host"]
+  backup:
+    profiles: ["offsite-backup"]

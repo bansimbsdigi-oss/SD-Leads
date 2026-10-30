@@ -61,7 +61,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             set -e
-            cd /opt/sabhi-leads
+            cd /opt/sd-leads
             git fetch --all && git reset --hard ${{ github.sha }}
             export IMAGE_TAG=${{ github.sha }}
             docker compose build app worker
