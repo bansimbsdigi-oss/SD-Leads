@@ -188,7 +188,7 @@ export function normaliseWebhookBody(rawBody: Obj): NormalisedWebhook {
     if (key === "fields" || key === "meta" || key === "form" || key === "tracking" || key === "consent") continue;
     const lower = key.toLowerCase().trim();
     if (CONTROL_KEYS.has(lower)) continue;
-    if (TRACKING_KEYS.has(lower)) { addTracking(lower, raw); continue; }
+    if (TRACKING_KEYS.has(lower) || lower.startsWith("utm_")) { addTracking(lower, raw); continue; }
     if (META_ALIASES[lower]) {
       if (META_ALIASES[lower] === "form_name") formName = str(raw) ?? formName;
       addTracking(META_ALIASES[lower], raw);

@@ -159,11 +159,40 @@ const SOURCES = [
   { value: "meta_instant_form", label: "Meta form" },
 ];
 
-const TRACKING_FIELDS = [
-  { key: "utm_source", label: "utm_source" },
-  { key: "utm_medium", label: "utm_medium" },
-  { key: "utm_campaign", label: "utm_campaign" },
+// Tracking columns appear for whatever details the leads in view actually carry, in this order first.
+const TRACKING_ORDER = [
+  "page_url", "landing_url", "referrer", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+  "utm_id", "utm_placement", "fbclid", "fbp", "fbc", "gclid", "form_name", "form_id", "page_path", "page_identity",
 ];
+const TRACKING_LABELS: Record<string, string> = {
+  page_url: "Page URL", landing_url: "First page", referrer: "Referrer", form_name: "Form name", form_id: "Form ID",
+  page_path: "Page path", page_identity: "Page ID", ip: "IP address", user_agent: "Browser",
+};
+export const trackingLabel = (key: string) => TRACKING_LABELS[key] ?? key;
+const TRACKING_SAMPLE = 5000;
+const MAX_TRACKING_COLUMNS = 40;
+
+/**
+ * Tracking keys used by the leads in view. Reads only the newest leads (index-backed), so it stays
+ * instant however many leads there are; a key that only very old leads have won't get a column.
+ */
+export async function trackingKeys(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<string[]> {
+  const where: Prisma.Sql[] = [leadScopeSql(ctx)];
+  if (scope.clientId) where.push(Prisma.sql`l.client_id = ${scope.clientId}`);
+  if (scope.lpId) where.push(Prisma.sql`l.lp_id = ${scope.lpId}`);
+  const rows = await prisma.$queryRaw<{ k: string }[]>(Prisma.sql`
+    SELECT DISTINCT k FROM (
+      SELECT l.tracking FROM leads l WHERE ${Prisma.join(where, " AND ")} ORDER BY l.created_at DESC LIMIT ${TRACKING_SAMPLE}
+    ) t CROSS JOIN LATERAL jsonb_object_keys(t.tracking) k`);
+  const rank = (k: string) => {
+    const i = TRACKING_ORDER.indexOf(k);
+    return i === -1 ? TRACKING_ORDER.length : i;
+  };
+  return rows
+    .map((r) => r.k)
+    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+    .slice(0, MAX_TRACKING_COLUMNS);
+}
 
 /** Every filterable / sortable field for the current view. */
 export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<FieldDef[]> {
@@ -171,8 +200,9 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
   const clientIds = clientId ? [clientId] : visibleClientIds(ctx);
   const clientFilter = clientIds === null ? {} : { clientId: { in: clientIds } };
 
-  const [answers, stages, lps, owners, clients] = await Promise.all([
+  const [answers, tracking, stages, lps, owners, clients] = await Promise.all([
     answerFields(ctx, scope),
+    trackingKeys(ctx, { clientId, lpId: scope.lpId }),
     prisma.pipelineStage.findMany({ where: clientFilter, orderBy: { position: "asc" }, select: { name: true } }),
     prisma.landingPage.findMany({ where: { AND: [lpWhere(ctx), clientId ? { clientId } : {}] }, orderBy: { name: "asc" }, select: { id: true, name: true, client: { select: { name: true } } } }),
     clientId ? prisma.user.findMany({ where: { clientId }, orderBy: { name: "asc" }, select: { id: true, name: true } }) : Promise.resolve([]),
@@ -225,9 +255,9 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
       sort: Prisma.sql`lower(${expr})`,
     });
   }
-  for (const t of TRACKING_FIELDS) {
-    const expr = Prisma.sql`(l.tracking ->> ${t.key})`;
-    defs.push({ id: `t:${t.key}`, label: t.label, kind: "text", group: "Tracking", expr, sort: Prisma.sql`lower(${expr})` });
+  for (const key of tracking) {
+    const expr = Prisma.sql`(l.tracking ->> ${key})`;
+    defs.push({ id: `t:${key}`, label: trackingLabel(key), kind: "text", group: "Tracking", expr, sort: Prisma.sql`lower(${expr})` });
   }
   return defs;
 }
@@ -328,6 +358,19 @@ export const LEAD_INCLUDE = {
 
 export type LeadRow = Prisma.LeadGetPayload<{ include: typeof LEAD_INCLUDE }>;
 
+/**
+ * A condition on a form ("a:key") or tracking ("t:key") field that has no column right now (e.g. no
+ * recent lead carries it) still filters on that key, so it matches nothing rather than being dropped.
+ * Keys are bound as parameters, never spliced into SQL.
+ */
+function jsonFieldDef(id: string): FieldDef | undefined {
+  const m = /^(a|t):(.{1,200})$/.exec(id);
+  if (!m) return undefined;
+  const col = m[1] === "a" ? Prisma.raw("l.answers") : Prisma.raw("l.tracking");
+  const expr = Prisma.sql`(${col} ->> ${m[2]})`;
+  return { id, label: m[2], kind: "text", group: m[1] === "a" ? "Form" : "Tracking", expr, json: m[1] === "a" ? Prisma.sql`(${col} -> ${m[2]})` : undefined, sort: Prisma.sql`lower(${expr})` };
+}
+
 const FROM_LEADS = Prisma.sql`FROM leads l
     LEFT JOIN pipeline_stages s ON s.id = l.status_id
     LEFT JOIN users o ON o.id = l.owner_id
@@ -347,7 +390,7 @@ function buildWhere(ctx: Ctx, query: LeadQuery, byId: Map<string, FieldDef>, ski
   if (query.q) where.push(searchSql(query.q));
   for (const c of query.conditions) {
     if (c.field === skipField) continue;
-    const def = byId.get(c.field);
+    const def = byId.get(c.field) ?? jsonFieldDef(c.field);
     const sql = def && conditionSql(def, c);
     if (sql) where.push(sql);
   }

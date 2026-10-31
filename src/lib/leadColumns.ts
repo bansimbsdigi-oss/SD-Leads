@@ -1,6 +1,6 @@
 // Column definitions shared by the leads table and CSV export, so the CSV always matches the screen.
 // Column ids match leadQuery field ids, so every column can be sorted.
-import { answerFields, type LeadRow } from "@/lib/leadQuery";
+import { answerFields, trackingKeys, trackingLabel, type LeadRow } from "@/lib/leadQuery";
 import { isSabhiStaff, type Ctx } from "@/lib/tenant";
 
 export type Column = { id: string; header: string; value: (lead: LeadRow) => string };
@@ -24,7 +24,10 @@ const SOURCE_LABEL: Record<string, string> = { lp: "LP snippet", webhook: "Webho
 
 export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<Column[]> {
   const singleClient = Boolean(scope.clientId) || !isSabhiStaff(ctx);
-  const answers = await answerFields(ctx, scope);
+  const [answers, tracking] = await Promise.all([
+    answerFields(ctx, scope),
+    trackingKeys(ctx, { clientId: scope.clientId ?? (isSabhiStaff(ctx) ? undefined : ctx.clientId ?? undefined), lpId: scope.lpId }),
+  ]);
   const track = (k: string) => (l: LeadRow) => formatAnswer((l.tracking as Record<string, unknown>)[k]);
   return [
     { id: "created_at", header: "Created", value: (l) => formatDateTime(l.createdAt) },
@@ -45,8 +48,7 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
       },
     })),
     { id: "score", header: "Score", value: (l) => (l.totalScore ?? "").toString() },
-    { id: "t:utm_source", header: "utm_source", value: track("utm_source") },
-    { id: "t:utm_campaign", header: "utm_campaign", value: track("utm_campaign") },
+    ...tracking.map<Column>((k) => ({ id: `t:${k}`, header: trackingLabel(k), value: track(k) })),
   ];
 }
 

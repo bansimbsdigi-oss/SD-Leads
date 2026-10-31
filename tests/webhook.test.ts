@@ -292,3 +292,34 @@ describe("forms that send page details next to the answers", () => {
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: untouched.id } })).name).toBe("Asha");
   });
 });
+
+describe("tracking columns", () => {
+  beforeEach(resetDb);
+
+  it("shows every tracking detail the leads carry, page URL and UTMs first", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client } = await makeClient("vinita");
+    await ingestClientWebhook(client, {
+      name: "test divya", email: "test@gmail.com", phone: "1231231231", ref: "Ref", utm_placement: "feed",
+      _fbp: "fb.1.17885892574.31368", page_url: "https://vinitabaghela.com/masterclass.html", Pixel_ID: "1079024314651914",
+    });
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const cols = await leadColumns(admin, {});
+    const tracking = cols.filter((c) => c.id.startsWith("t:")).map((c) => c.header);
+    expect(tracking).toEqual(["Page URL", "utm_placement", "fbp"]);
+    const lead = await prisma.lead.findFirstOrThrow();
+    expect(cols.find((c) => c.id === "t:fbp")!.value(lead as never)).toBe("fb.1.17885892574.31368");
+    expect(lead.answers).not.toHaveProperty("utm_placement"); // utm_* counts as tracking
+    expect(cols.some((c) => c.header === "Pixel_ID")).toBe(true); // other form fields stay columns
+  });
+
+  it("a condition on a tracking field no lead has yet matches nothing, not everything", async () => {
+    const { leadMatchesConditions } = await import("@/lib/leadQuery");
+    const { client } = await makeClient("vinita");
+    const r = await ingestClientWebhook(client, { name: "A", email: "a@x.com" });
+    if (!r.ok) throw new Error("expected ok");
+    expect(await leadMatchesConditions(client.id, r.leadId, [{ field: "t:utm_source", op: "is", value: "meta" }])).toBe(false);
+    expect(await leadMatchesConditions(client.id, r.leadId, [{ field: "t:utm_source", op: "empty" }])).toBe(true);
+  });
+});

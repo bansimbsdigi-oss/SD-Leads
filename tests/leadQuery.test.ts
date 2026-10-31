@@ -85,7 +85,10 @@ describe("lead query", () => {
   });
 
   it("ignores unknown fields and invalid operators", async () => {
-    expect(await where({ field: "a:nope'; DROP TABLE leads;--", op: "is", value: "x" })).toHaveLength(3);
+    // Unknown form/tracking keys still filter (safely bound), so nothing matches instead of everything.
+    expect(await where({ field: "a:nope'; DROP TABLE leads;--", op: "is", value: "x" })).toEqual([]);
+    expect(await prisma.lead.count()).toBe(3);
+    expect(await where({ field: "z:unknown", op: "is", value: "x" })).toHaveLength(3); // not a field id at all: ignored
     expect(await where({ field: "name", op: "gt", value: "x" })).toHaveLength(3);
   });
 
