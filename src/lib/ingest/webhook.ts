@@ -1,6 +1,7 @@
 // Client webhook: turns whatever a form tool posts (lead.js JSON, Elementor, WPForms, Pabbly, plain
 // key/value forms) into our ingest payload, and works out which LP it came from.
 import { createHash } from "node:crypto";
+import { canonicalFieldKey, toFieldKey } from "./fieldKeys";
 import type { IngestField } from "./schema";
 
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
@@ -58,14 +59,27 @@ const META_ALIASES: Record<string, string> = {
   "user agent": "user_agent", user_agent: "user_agent", "remote ip": "ip", remote_ip: "ip", ip: "ip",
   date: "date", time: "time", "powered by": "powered_by", form_id: "form_id", form_name: "form_name",
   "form name": "form_name", "form id": "form_id", post_id: "post_id",
+  // Page details some forms send with each lead: page info, not answers. page_name labels new LPs.
+  page_name: "form_name", "page name": "form_name", pagename: "form_name", page_title: "form_name",
+  page_identity: "page_identity", page_id: "page_id", page_path: "page_path", "page path": "page_path",
 };
 const CONTROL_KEYS = new Set(["submission_id", "lp", "lp_key", "turnstile_token", "action", "_wpnonce", "g-recaptcha-response", "cf-turnstile-response"]);
 
+/**
+ * Which core column a field feeds. Strict on purpose: "page_name", "form_name", "company_name" are not
+ * the person's name, and "email_consent" is not an email address.
+ */
 export function guessRole(key: string, label = ""): IngestField["role"] {
-  const s = `${key} ${label}`.toLowerCase();
-  if (/e-?mail/.test(s)) return "email";
-  if (/phone|mobile|whats\s?app|contact\s*(no|number)|\bcell\b|\btel\b/.test(s)) return "phone";
-  if (/(^|[\s_])(full[\s_]?)?name\b|your name|first[\s_]?name/.test(s) && !/company|business|brand|user ?name/.test(s)) return "name";
+  const shared = [key, label].filter(Boolean).map((x) => canonicalFieldKey(toFieldKey(x)));
+  if (shared.includes("email")) return "email";
+  if (shared.includes("phone")) return "phone";
+  if (shared.includes("name") || shared.includes("first_name")) return "name";
+  // Looser spellings, e.g. "Email (work)", "Name as on ID", "Phone (with country code)".
+  const parts = [key, label].filter(Boolean).map((x) => x.toLowerCase().replace(/[_-]+/g, " ").trim());
+  const skip = /consent|opt.?in|subscri|preferred|confirm|verify|type|method/;
+  if (parts.some((p) => /^(your |work |personal )?e ?mail\b/.test(p) && !skip.test(p))) return "email";
+  if (parts.some((p) => /^(your )?(phone|mobile|whats ?app|contact (no|number))\b/.test(p) && !skip.test(p))) return "phone";
+  if (parts.some((p) => /^(your )?(full )?name\b/.test(p))) return "name";
   return null;
 }
 

@@ -217,3 +217,78 @@ describe("merged columns", () => {
     expect(leads.map((l) => [l.name, l.emailNormalised])).toEqual([["A", "a@x.com"], ["B", "b@x.com"], ["C", "c@x.com"]]);
   });
 });
+
+describe("forms that send page details next to the answers", () => {
+  beforeEach(resetDb);
+
+  // Same fields as the live "Project & Quote Request Form".
+  const projectForm = {
+    page_identity: "project_quote_request",
+    page_name: "Project & Quote Request Form",
+    page_path: "/project-request.html",
+    formType: "Project & Quote Request",
+    name: "Sabhi Digital",
+    email: "bansi.mbsdigi@gmail.com",
+    company: "SD",
+    phone: "9876543210",
+    service: "Mobile App Development",
+    timeline: "Flexible / Ongoing",
+    budget: "$15,000 - $35,000",
+    message: "Need an app",
+    preferredContact: "Email",
+    referralSource: "Google / Search Engine",
+  };
+
+  it("uses the person's name, not the page name, and keeps page details out of the answers", async () => {
+    const { client } = await makeClient("lax");
+    const r = await ingestClientWebhook(client, projectForm);
+    if (!r.ok) throw new Error("expected ok");
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: r.leadId }, include: { lp: true } });
+    expect(lead.name).toBe("Sabhi Digital");
+    expect(lead.phoneNormalised).toBe("+919876543210");
+    expect(lead.emailNormalised).toBe("bansi.mbsdigi@gmail.com");
+    expect(lead.answers).not.toHaveProperty("page_name");
+    expect(lead.answers).toMatchObject({ company: "SD", budget: "$15,000 - $35,000", preferredcontact: "Email" });
+    expect(lead.tracking).toMatchObject({ page_identity: "project_quote_request", page_path: "/project-request.html", form_name: "Project & Quote Request Form" });
+    expect(lead.lp?.name).toBe("Project & Quote Request Form");
+  });
+
+  it("is strict about which fields are the person's name, email and phone", () => {
+    expect(guessRole("page_name")).toBeNull();
+    expect(guessRole("form_name")).toBeNull();
+    expect(guessRole("company_name")).toBeNull();
+    expect(guessRole("user_name")).toBeNull();
+    expect(guessRole("product_name")).toBeNull();
+    expect(guessRole("name")).toBe("name");
+    expect(guessRole("Your Full Name")).toBe("name");
+    expect(guessRole("first_name")).toBe("name");
+    expect(guessRole("Name as on ID")).toBe("name");
+    expect(guessRole("email_consent")).toBeNull();
+    expect(guessRole("preferredContact")).toBeNull();
+    expect(guessRole("Email (work)")).toBe("email");
+    expect(guessRole("Phone (with country code)")).toBe("phone");
+  });
+
+  it("joins first and last name when there is no full-name field, and skips invalid emails", async () => {
+    const { client } = await makeClient("lax");
+    const r = await ingestClientWebhook(client, { first_name: "Asha", last_name: "Rao", "Email (work)": "not given", "Your Email": "asha@rao.in" });
+    if (!r.ok) throw new Error("expected ok");
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: r.leadId } });
+    expect([lead.name, lead.emailNormalised]).toEqual(["Asha Rao", "asha@rao.in"]);
+  });
+
+  it("the one-time repair restores names that were saved as the page title", async () => {
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const { client, lp } = await makeClient("lax");
+    const wrong = await prisma.lead.create({
+      data: { clientId: client.id, lpId: lp.id, submissionId: "old-1", name: "Project & Quote Request Form", answers: projectForm },
+    });
+    const untouched = await prisma.lead.create({
+      data: { clientId: client.id, lpId: lp.id, submissionId: "old-2", name: "Asha", answers: { name: "Asha", page_name: "Contact" } },
+    });
+    const dir = readdirSync("prisma/migrations").find((d) => d.endsWith("fix_form_name_as_lead_name"))!;
+    await prisma.$executeRawUnsafe(readFileSync(`prisma/migrations/${dir}/migration.sql`, "utf8"));
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: wrong.id } })).name).toBe("Sabhi Digital");
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: untouched.id } })).name).toBe("Asha");
+  });
+});

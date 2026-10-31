@@ -28,9 +28,27 @@ export function prepareFields(fields: IngestField[]): PreparedField[] {
   }));
 }
 
-function firstValueFor(fields: PreparedField[], role: FieldRole): string | null {
-  const field = fields.find((f) => f.role === role && typeof f.value === "string" && f.value.trim());
-  return field ? (field.value as string).trim() : null;
+const textValue = (f: PreparedField) => (typeof f.value === "string" ? f.value.trim() : "");
+
+/** First email / phone that is actually valid, so a "yes" or a blank field can't hide the real one. */
+function firstValid(fields: PreparedField[], role: "email" | "phone", normalise: (v: string) => string | null): string | null {
+  for (const f of fields) {
+    if (f.role !== role) continue;
+    const v = textValue(f) && normalise(textValue(f));
+    if (v) return v;
+  }
+  return null;
+}
+
+/** The person's name: a "name" field first, else first + last name, else any other name-role field. */
+function pickName(fields: PreparedField[]): string | null {
+  const named = (key: string) => fields.find((f) => f.key === key && textValue(f));
+  const full = named("name");
+  if (full) return textValue(full);
+  const parts = [named("first_name"), named("last_name")].filter(Boolean).map((f) => textValue(f!));
+  if (parts.length) return parts.join(" ");
+  const any = fields.find((f) => f.role === "name" && textValue(f));
+  return any ? textValue(any) : null;
 }
 
 // last_seen_at is refreshed at most this often, so steady traffic doesn't rewrite registry rows.
@@ -127,9 +145,9 @@ export async function ingestLead(
   if (existing) return { leadId: existing.id, created: false, duplicateOfId: existing.duplicateOfId };
 
   const fields = prepareFields(payload.fields);
-  const phone = normalisePhone(firstValueFor(fields, "phone"));
-  const email = normaliseEmail(firstValueFor(fields, "email"));
-  const name = firstValueFor(fields, "name");
+  const phone = firstValid(fields, "phone", normalisePhone);
+  const email = firstValid(fields, "email", normaliseEmail);
+  const name = pickName(fields)?.slice(0, 200) ?? null;
 
   const answers: Record<string, unknown> = {};
   const scores: Record<string, number> = {};
