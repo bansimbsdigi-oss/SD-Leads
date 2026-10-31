@@ -5,7 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { BLANK, MAX_FILTER_VALUES, OPS, RANGES, type Condition, type FieldMeta, type RangeId } from "@/lib/leadFilterSpec";
 import { canonicalFieldKey, toFieldKey } from "@/lib/ingest/fieldKeys";
-import { readKeys, RECEIVED_VIA_LABEL, STANDARD_COLUMNS, STANDARD_KEYS, type StandardColumn } from "@/lib/standardColumns";
+import { isDroppedKey, looseKey, readKeys, RECEIVED_VIA_LABEL, STANDARD_COLUMNS, STANDARD_KEYS, standardKeyOf, type StandardColumn } from "@/lib/standardColumns";
 import { isSabhiStaff, leadScopeSql, lpWhere, visibleClientIds, type Ctx } from "@/lib/tenant";
 
 export const PAGE_SIZES = [25, 50, 100, 250, 500, 1000] as const;
@@ -150,20 +150,24 @@ export async function formFieldGroups(ctx: Ctx, scope: { clientId?: string; lpId
   const absorbed: Absorbed = {};
   for (const f of fields) {
     const key = groupKey(f.fieldKey, f.label);
-    if (STANDARD_KEYS.has(key)) {
-      absorb(absorbed, key, f.fieldKey); // shown in its fixed column, whatever role it was given
+    const std = standardKeyOf(key);
+    if (std) {
+      absorb(absorbed, std, f.fieldKey); // shown in its fixed column, whatever role it was given
       continue;
     }
-    if (f.role || CORE_KEYS.has(key) || STANDARD_KEYS.has(f.fieldKey)) continue; // name / Mobile / email or fixed
+    if (f.role || CORE_KEYS.has(key) || standardKeyOf(f.fieldKey) || isDroppedKey(key)) continue; // name / Mobile / email, fixed or dropped
     const label = f.displayLabel || f.label;
     const options = Array.isArray(f.options) ? (f.options as unknown[]).map(String) : [];
-    const existing = byKey.get(key);
+    // "eventId" (stored as "eventid") and "event_id" are one column.
+    const existing = byKey.get(looseKey(key));
     if (!existing) {
-      byKey.set(key, { key, keys: [f.fieldKey], label, inputType: f.inputType, options, lastSeen: f.lastSeenAt.getTime() });
+      byKey.set(looseKey(key), { key, keys: [f.fieldKey], label, inputType: f.inputType, options, lastSeen: f.lastSeenAt.getTime() });
     } else {
       if (!existing.keys.includes(f.fieldKey)) existing.keys.push(f.fieldKey);
+      // Spelt with underscores ("event_id") beats run together ("eventId"): keep that name.
       existing.options = [...new Set([...existing.options, ...options])];
-      if (f.lastSeenAt.getTime() > existing.lastSeen) Object.assign(existing, { label, lastSeen: f.lastSeenAt.getTime() });
+      if (key.length > existing.key.length) Object.assign(existing, { key, label });
+      else if (key.length === existing.key.length && f.lastSeenAt.getTime() > existing.lastSeen) Object.assign(existing, { label, lastSeen: f.lastSeenAt.getTime() });
     }
   }
   const answers = [...byKey.values()].map((f) => ({ key: f.key, keys: f.keys, label: f.label, inputType: f.inputType, options: f.options }));
@@ -230,7 +234,7 @@ export async function trackingKeys(ctx: Ctx, scope: { clientId?: string; lpId?: 
   };
   return rows
     .map((r) => r.k)
-    .filter((k) => !STANDARD_KEYS.has(k) && !STANDARD_KEYS.has(sharedKey(k)) && !CORE_KEYS.has(sharedKey(k))) // has a fixed column
+    .filter((k) => !standardKeyOf(k) && !standardKeyOf(sharedKey(k)) && !CORE_KEYS.has(sharedKey(k)) && !isDroppedKey(sharedKey(k))) // fixed or dropped
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
     .slice(0, MAX_TRACKING_COLUMNS);
 }
@@ -248,8 +252,32 @@ export async function trackingAbsorbed(ctx: Ctx, scope: { clientId?: string; lpI
       SELECT l.tracking FROM leads l WHERE ${Prisma.join(where, " AND ")} ORDER BY l.created_at DESC LIMIT ${TRACKING_SAMPLE}
     ) t CROSS JOIN LATERAL jsonb_object_keys(t.tracking) k`);
   const out: Absorbed = {};
-  for (const { k } of rows) if (!STANDARD_KEYS.has(k) && STANDARD_KEYS.has(sharedKey(k))) absorb(out, sharedKey(k), k);
+  for (const { k } of rows) {
+    const std = STANDARD_KEYS.has(k) ? undefined : standardKeyOf(sharedKey(k));
+    if (std) absorb(out, std, k);
+  }
   return out;
+}
+
+/**
+ * Tracking keys as columns. A key that names a form column (ignoring underscores and case, e.g.
+ * "eventId" for "event_id") feeds that column; the rest are grouped the same way among themselves.
+ */
+export function groupTracking(answers: { key: string }[], tracking: string[]) {
+  const answerByLoose = new Map(answers.map((a) => [looseKey(a.key), a.key]));
+  const intoAnswer: Record<string, string[]> = {};
+  const columns = new Map<string, { key: string; keys: string[] }>();
+  for (const k of tracking) {
+    const loose = looseKey(sharedKey(k));
+    const answer = answerByLoose.get(loose);
+    if (answer) (intoAnswer[answer] ??= []).push(k);
+    else if (columns.has(loose)) {
+      const c = columns.get(loose)!;
+      c.keys.push(k);
+      if (k.length > c.key.length) c.key = k; // "page_url" names the column, not "pageUrl"
+    } else columns.set(loose, { key: k, keys: [k] });
+  }
+  return { intoAnswer, columns: [...columns.values()] };
 }
 
 /** Every filterable / sortable field for the current view. */
@@ -302,16 +330,16 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
     { id: "score", label: "Quiz score", kind: "number", group: "Lead", expr: Prisma.sql`l.total_score::text`, num: Prisma.sql`l.total_score`, sort: Prisma.sql`l.total_score` },
   ];
 
-  const answerSet = new Set(answers.map((a) => a.key));
-  const trackingSet = new Set(tracking);
+  const grouped = groupTracking(answers, tracking);
   for (const a of answers) {
     // Several stored keys can feed one column: use the first filled one.
-    const fromTracking = trackingSet.has(a.key);
+    const trackKeys = grouped.intoAnswer[a.key] ?? [];
+    const fromTracking = trackKeys.length > 0;
     const expr =
       a.keys.length === 1 && !fromTracking
         ? Prisma.sql`(l.answers ->> ${a.keys[0]})`
         : Prisma.sql`COALESCE(${Prisma.join(
-            [...a.keys.map((k) => Prisma.sql`NULLIF(l.answers ->> ${k}, '')`), ...(fromTracking ? [Prisma.sql`NULLIF(l.tracking ->> ${a.key}, '')`] : [])],
+            [...a.keys.map((k) => Prisma.sql`NULLIF(l.answers ->> ${k}, '')`), ...trackKeys.map((k) => Prisma.sql`NULLIF(l.tracking ->> ${k}, '')`)],
             ", ",
           )})`;
     const json =
@@ -329,9 +357,8 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
       sort: Prisma.sql`lower(${expr})`,
     });
   }
-  for (const key of tracking) {
-    if (answerSet.has(key)) continue; // same field also arrives as a form answer: one column
-    const expr = Prisma.sql`(l.tracking ->> ${key})`;
+  for (const { key, keys } of grouped.columns) {
+    const expr = keys.length === 1 ? Prisma.sql`(l.tracking ->> ${key})` : Prisma.sql`COALESCE(${Prisma.join(keys.map((k) => Prisma.sql`NULLIF(l.tracking ->> ${k}, '')`), ", ")})`;
     defs.push({ id: `t:${key}`, label: trackingLabel(key), kind: "text", group: "Tracking", expr, sort: Prisma.sql`lower(${expr})` });
   }
   return defs;

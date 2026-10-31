@@ -332,7 +332,6 @@ describe("fixed column layout", () => {
   const HEADERS = [
     "Date of Registration", "name", "Mobile", "email", "tag", "Formatted WhatsApp Number", "Source",
     "utm_term", "utm_source", "utm_content", "utm_campaign", "utm_placement", "fbclid", "gclid", "utm_medium",
-    "Zoom Direct LInk", "Zoom Direct Button", "Zoom Webinar Link", "Zoom Webinar Button", "New Zoom Direct Link", "New Zoom Direct Button",
     "Fbc", "Fbp", "Pixel_ID", "Source_Platform", "Timestamp", "IP Address", "UserAgent", "AccessT", "Campaign_ID", "Adset_ID", "Ad_ID",
   ];
 
@@ -342,7 +341,7 @@ describe("fixed column layout", () => {
     const { client } = await makeClient("vinita");
     const r = await ingestClientWebhook(client, {
       Name: "Divya", Mobile: "9876500011", Email: "d@x.com", Tag: "Hot",
-      "Zoom Direct LInk": "https://zoom.us/j/1", "Pixel_ID": "107902", client_ip_address: "157.48.1.1",
+      "Pixel_ID": "107902", client_ip_address: "157.48.1.1",
       client_user_agent: "Mozilla/5.0", event_time: "1793437516", Campaign_ID: "c1", "Ad Set ID": "s1",
       Budget: "5L+", "Page URL": "https://vinita.com/masterclass",
     });
@@ -359,10 +358,25 @@ describe("fixed column layout", () => {
     expect([v("name"), v("Mobile"), v("email"), v("tag")]).toEqual(["Divya", "+919876500011", "d@x.com", "Hot"]);
     expect(v("Formatted WhatsApp Number")).toBe("919876500011"); // built from Mobile
     expect(v("Source")).toBe("Webhook"); // no source sent: how it arrived
-    expect([v("Zoom Direct LInk"), v("Pixel_ID"), v("IP Address"), v("UserAgent"), v("Timestamp")]).toEqual([
-      "https://zoom.us/j/1", "107902", "157.48.1.1", "Mozilla/5.0", "1793437516",
+    expect([v("Pixel_ID"), v("IP Address"), v("UserAgent"), v("Timestamp")]).toEqual([
+      "107902", "157.48.1.1", "Mozilla/5.0", "1793437516",
     ]);
     expect([v("Campaign_ID"), v("Adset_ID")]).toEqual(["c1", "s1"]);
+  });
+
+  it("one column for a field spelt with and without underscores (event_id / eventId)", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client } = await makeClient("vinita");
+    const a = await ingestClientWebhook(client, { Name: "A", Mobile: "9876500021", event_id: "evt_1" });
+    const b = await ingestClientWebhook(client, { Name: "B", Mobile: "9876500022", eventId: "evt_2" });
+    if (!a.ok || !b.ok) throw new Error("expected ok");
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const cols = await leadColumns(admin, { clientId: client.id });
+    const eventCols = cols.filter((c) => /event_?id/i.test(c.header));
+    expect(eventCols.map((c) => c.header)).toEqual(["event_id"]);
+    const leads = await prisma.lead.findMany({ where: { clientId: client.id }, orderBy: { name: "asc" } });
+    expect(leads.map((l) => eventCols[0].value(l as never))).toEqual(["evt_1", "evt_2"]);
   });
 
   it("fixed columns can be filtered and sorted like any other", async () => {

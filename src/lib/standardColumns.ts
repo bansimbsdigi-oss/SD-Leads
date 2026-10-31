@@ -33,12 +33,6 @@ export const STANDARD_COLUMNS: StandardColumn[] = [
   col("fbclid", "fbclid", ["fbclid"]),
   col("gclid", "gclid", ["gclid"]),
   col("utm_medium", "utm_medium", ["utm_medium"]),
-  col("zoom_direct_link", "Zoom Direct LInk", ["zoom_direct_link"]),
-  col("zoom_direct_button", "Zoom Direct Button", ["zoom_direct_button"]),
-  col("zoom_webinar_link", "Zoom Webinar Link", ["zoom_webinar_link"]),
-  col("zoom_webinar_button", "Zoom Webinar Button", ["zoom_webinar_button"]),
-  col("new_zoom_direct_link", "New Zoom Direct Link", ["new_zoom_direct_link"]),
-  col("new_zoom_direct_button", "New Zoom Direct Button", ["new_zoom_direct_button"]),
   col("fbc", "Fbc", ["fbc", "_fbc"]),
   col("fbp", "Fbp", ["fbp", "_fbp"]),
   col("pixel_id", "Pixel_ID", ["pixel_id", "pixelid"]),
@@ -52,8 +46,24 @@ export const STANDARD_COLUMNS: StandardColumn[] = [
   col("ad_id", "Ad_ID", ["ad_id"]),
 ];
 
+/** Never a table column (still shown on the lead's own page). Matched ignoring underscores. */
+const DROPPED_KEYS = [
+  "zoom_direct_link", "zoom_direct_button", "zoom_webinar_link", "zoom_webinar_button", "new_zoom_direct_link", "new_zoom_direct_button",
+];
+
 /** Keys already shown by a fixed column; they don't get an extra column at the end. */
 export const STANDARD_KEYS = new Set(STANDARD_COLUMNS.flatMap((c) => c.keys));
+
+/** A key without its underscores, so "eventId" (stored as "eventid") and "event_id" count as one field. */
+export const looseKey = (k: string) => k.replace(/_/g, "");
+
+const STANDARD_BY_LOOSE = new Map([...STANDARD_KEYS].reverse().map((k) => [looseKey(k), k])); // first key of a column wins
+
+const DROPPED_LOOSE = new Set(DROPPED_KEYS.map(looseKey));
+export const isDroppedKey = (k: string) => DROPPED_LOOSE.has(looseKey(k));
+
+/** The fixed-column key a stored key belongs to ("pixelid" -> "pixel_id"), if any. */
+export const standardKeyOf = (k: string): string | undefined => (STANDARD_KEYS.has(k) ? k : STANDARD_BY_LOOSE.get(looseKey(k)));
 
 /**
  * Keys to read for a column: its own keys plus the "_2"/"_3" copies older leads may have (the same field

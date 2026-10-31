@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui";
+import { ALWAYS_SHOWN, readHiddenColumns, writeHiddenColumns } from "@/lib/hiddenColumns";
 import { OPS, type Condition, type FieldMeta, type Op } from "@/lib/leadFilterSpec";
 
 type Value = { value: string; label: string; count: number };
@@ -108,6 +109,12 @@ export function ColumnHeader({
     startTransition(() => router.push(next.size ? `${pathname}?${next}` : pathname));
   }
 
+  function hideColumn() {
+    writeHiddenColumns([...readHiddenColumns(), columnId]);
+    close();
+    startTransition(() => router.refresh());
+  }
+
   const withFilters = (list: Condition[]) => ({ f: list.length ? JSON.stringify(list) : null });
 
   function apply() {
@@ -173,6 +180,9 @@ export function ColumnHeader({
             </button>
             {sortDir && (
               <button type="button" className={`${menuItem} text-slate-500`} onClick={() => navigate({ sort: null, dir: null })}>Remove sort</button>
+            )}
+            {!ALWAYS_SHOWN.has(columnId) && (
+              <button type="button" className={menuItem} onClick={hideColumn}>Hide column</button>
             )}
           </div>
 

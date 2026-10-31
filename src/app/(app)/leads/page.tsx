@@ -1,11 +1,14 @@
 import { Download, Inbox, SearchX } from "lucide-react";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { ColumnHeader } from "@/components/ColumnHeader";
+import { ColumnPicker } from "@/components/ColumnPicker";
 import { BulkDeleteBar, RowCheckbox, SelectAllCheckbox } from "@/components/LeadDelete";
 import { LeadToolbar } from "@/components/LeadToolbar";
 import { Pagination } from "@/components/Pagination";
 import { Avatar, Badge, buttonClass, Card, Empty, PageHeader, StatusBadge, tableClass } from "@/components/ui";
 import { listClientOptions } from "@/lib/data";
+import { ALWAYS_SHOWN, HIDDEN_COLUMNS_COOKIE, parseHiddenColumns } from "@/lib/hiddenColumns";
 import { leadColumns } from "@/lib/leadColumns";
 import { DEFAULT_PAGE_SIZE, leadFieldDefs, PAGE_SIZES, parseLeadQuery, queryLeads, queryToParams, toFieldMeta } from "@/lib/leadQuery";
 import { requireCtx } from "@/lib/session";
@@ -18,12 +21,15 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
   const query = parseLeadQuery(await searchParams);
   const scope = { clientId: query.clientId };
 
-  const [clients, defs, columns] = await Promise.all([
+  const hidden = parseHiddenColumns((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
+
+  const [clients, defs, allColumns] = await Promise.all([
     isSabhiStaff(ctx) ? listClientOptions(ctx) : Promise.resolve([]),
     leadFieldDefs(ctx, scope),
     leadColumns(ctx, scope),
   ]);
   const { rows: leads, total, totalCapped } = await queryLeads(ctx, query, defs);
+  const columns = allColumns.filter((c) => ALWAYS_SHOWN.has(c.id) || !hidden.has(c.id));
 
   const selectedClient = clients.find((c) => c.id === query.clientId);
   const filtered = Boolean(query.q || query.range || query.conditions.length);
@@ -50,9 +56,12 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
           </span>
         }
         actions={
-          <a className={buttonClass("secondary", "sm")} href={`/api/leads/export?${exportParams}`}>
-            <Download aria-hidden /> Export CSV
-          </a>
+          <>
+            <ColumnPicker columns={allColumns.map((c) => ({ id: c.id, header: c.header }))} hidden={[...hidden]} />
+            <a className={buttonClass("secondary", "sm")} href={`/api/leads/export?${exportParams}`}>
+              <Download aria-hidden /> Export CSV
+            </a>
+          </>
         }
       />
       <Card className="mb-4">

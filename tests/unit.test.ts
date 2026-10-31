@@ -107,3 +107,23 @@ describe("same field, one key", () => {
     expect(assignFieldKeys(["Budget"])).toEqual(["budget"]);
   });
 });
+
+describe("columns that differ only by underscores", () => {
+  it("map to the fixed column", async () => {
+    const { standardKeyOf } = await import("@/lib/standardColumns");
+    expect(standardKeyOf("pixel_i_d")).toBe("pixel_id");
+    expect(standardKeyOf("utmsource")).toBe("utm_source");
+    expect(standardKeyOf("adsetid")).toBe("adset_id");
+    expect(standardKeyOf("event_id")).toBeUndefined();
+  });
+
+  it("fold tracking keys into the matching form column or one tracking column", async () => {
+    const { groupTracking } = await import("@/lib/leadQuery");
+    const g = groupTracking([{ key: "event_id" }], ["eventId", "page_url", "pageUrl", "referrer"]);
+    expect(g.intoAnswer).toEqual({ event_id: ["eventId"] });
+    expect(g.columns).toEqual([
+      { key: "page_url", keys: ["page_url", "pageUrl"] },
+      { key: "referrer", keys: ["referrer"] },
+    ]);
+  });
+});

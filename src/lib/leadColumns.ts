@@ -1,6 +1,6 @@
 // Column definitions shared by the leads table and CSV export, so the CSV always matches the screen.
 // Column ids match leadQuery field ids, so every column can be sorted.
-import { columnKeys, formFieldGroups, trackingAbsorbed, trackingKeys, trackingLabel, type LeadRow } from "@/lib/leadQuery";
+import { columnKeys, formFieldGroups, groupTracking, trackingAbsorbed, trackingKeys, trackingLabel, type LeadRow } from "@/lib/leadQuery";
 import { RECEIVED_VIA_LABEL, STANDARD_COLUMNS, standardValue } from "@/lib/standardColumns";
 import { isSabhiStaff, type Ctx } from "@/lib/tenant";
 
@@ -33,7 +33,8 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
     trackingKeys(ctx, trackScope),
     trackingAbsorbed(ctx, trackScope),
   ]);
-  const track = (k: string) => (l: LeadRow) => formatAnswer((l.tracking as Record<string, unknown>)[k]);
+  const grouped = groupTracking(answers, tracking);
+  const firstFilled = (vals: unknown[]) => formatAnswer(vals.find((x) => x !== undefined && x !== null && x !== "") ?? "");
   return [
     { id: "created_at", header: "Date of Registration", value: (l) => formatDateTime(l.createdAt) },
     { id: "name", header: "name", value: (l) => l.name ?? "" },
@@ -55,12 +56,15 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
       value: (l) => {
         const answers = l.answers as Record<string, unknown>;
         const tracking = l.tracking as Record<string, unknown>;
-        const v = [...f.keys.map((k) => answers[k]), tracking[f.key]].find((x) => x !== undefined && x !== null && x !== "");
-        return formatAnswer(v ?? "");
+        return firstFilled([...f.keys.map((k) => answers[k]), ...(grouped.intoAnswer[f.key] ?? []).map((k) => tracking[k])]);
       },
     })),
     // A key that is also a form answer already has that column.
-    ...tracking.filter((k) => !answers.some((a) => a.key === k)).map<Column>((k) => ({ id: `t:${k}`, header: trackingLabel(k), value: track(k) })),
+    ...grouped.columns.map<Column>(({ key, keys }) => ({
+      id: `t:${key}`,
+      header: trackingLabel(key),
+      value: (l) => firstFilled(keys.map((k) => (l.tracking as Record<string, unknown>)[k])),
+    })),
   ];
 }
 
