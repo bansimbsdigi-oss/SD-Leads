@@ -5,7 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { BLANK, MAX_FILTER_VALUES, OPS, RANGES, type Condition, type FieldMeta, type RangeId } from "@/lib/leadFilterSpec";
 import { canonicalFieldKey, toFieldKey } from "@/lib/ingest/fieldKeys";
-import { readKeys, RECEIVED_VIA_LABEL, STANDARD_COLUMNS, STANDARD_KEYS } from "@/lib/standardColumns";
+import { readKeys, RECEIVED_VIA_LABEL, STANDARD_COLUMNS, STANDARD_KEYS, type StandardColumn } from "@/lib/standardColumns";
 import { isSabhiStaff, leadScopeSql, lpWhere, visibleClientIds, type Ctx } from "@/lib/tenant";
 
 export const PAGE_SIZES = [25, 50, 100, 250, 500, 1000] as const;
@@ -126,21 +126,35 @@ function groupKey(fieldKey: string, label: string): string {
   return key;
 }
 
+/** Stored keys that belong to a fixed column (by its key), e.g. { whatsapp: ["whatsapp_mobile_no", "phone_2"] }. */
+export type Absorbed = Record<string, string[]>;
+
+const absorb = (into: Absorbed, standardKey: string, rawKey: string) => {
+  const list = (into[standardKey] ??= []);
+  if (!list.includes(rawKey)) list.push(rawKey);
+};
+
 /**
- * Form-field columns for the leads in view: one LP, one client, or every client the user can see.
- * Fields are merged by their shared key, so "Email"/"E-mail"/"Email Address" never make extra columns.
+ * Form fields for the leads in view (one LP, one client, or every client the user can see), split into
+ * extra columns and keys absorbed by the fixed columns. Fields are merged by their shared key, so
+ * "Email"/"E-mail"/"Email Address" never make extra columns.
  */
-export async function answerFields(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<AnswerField[]> {
+export async function formFieldGroups(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<{ answers: AnswerField[]; absorbed: Absorbed }> {
   const clientId = scope.clientId ?? (isSabhiStaff(ctx) ? undefined : ctx.clientId ?? undefined);
   const lpFilter = scope.lpId ? { id: scope.lpId } : clientId ? { clientId } : {};
   const fields = await prisma.formField.findMany({
-    where: { isHidden: false, role: null, lp: { AND: [lpWhere(ctx), lpFilter] } },
+    where: { isHidden: false, lp: { AND: [lpWhere(ctx), lpFilter] } },
     orderBy: [{ position: "asc" }, { firstSeenAt: "asc" }],
   });
   const byKey = new Map<string, AnswerField & { lastSeen: number }>();
+  const absorbed: Absorbed = {};
   for (const f of fields) {
     const key = groupKey(f.fieldKey, f.label);
-    if (CORE_KEYS.has(key) || STANDARD_KEYS.has(key) || STANDARD_KEYS.has(f.fieldKey)) continue; // has a fixed column
+    if (STANDARD_KEYS.has(key)) {
+      absorb(absorbed, key, f.fieldKey); // shown in its fixed column, whatever role it was given
+      continue;
+    }
+    if (f.role || CORE_KEYS.has(key) || STANDARD_KEYS.has(f.fieldKey)) continue; // name / Mobile / email or fixed
     const label = f.displayLabel || f.label;
     const options = Array.isArray(f.options) ? (f.options as unknown[]).map(String) : [];
     const existing = byKey.get(key);
@@ -152,7 +166,18 @@ export async function answerFields(ctx: Ctx, scope: { clientId?: string; lpId?: 
       if (f.lastSeenAt.getTime() > existing.lastSeen) Object.assign(existing, { label, lastSeen: f.lastSeenAt.getTime() });
     }
   }
-  return [...byKey.values()].map((f) => ({ key: f.key, keys: f.keys, label: f.label, inputType: f.inputType, options: f.options }));
+  const answers = [...byKey.values()].map((f) => ({ key: f.key, keys: f.keys, label: f.label, inputType: f.inputType, options: f.options }));
+  return { answers, absorbed };
+}
+
+export async function answerFields(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<AnswerField[]> {
+  return (await formFieldGroups(ctx, scope)).answers;
+}
+
+/** Stored keys a fixed column reads: its own keys and their old copies, plus any absorbed names. */
+export function columnKeys(c: StandardColumn, ...groups: Absorbed[]): string[] {
+  const extra = c.keys.flatMap((k) => groups.flatMap((g) => g[k] ?? []));
+  return [...new Set([...readKeys(c), ...extra])];
 }
 
 type FieldDef = FieldMeta & {
@@ -205,9 +230,26 @@ export async function trackingKeys(ctx: Ctx, scope: { clientId?: string; lpId?: 
   };
   return rows
     .map((r) => r.k)
-    .filter((k) => !STANDARD_KEYS.has(k)) // has a fixed column
+    .filter((k) => !STANDARD_KEYS.has(k) && !STANDARD_KEYS.has(sharedKey(k)) && !CORE_KEYS.has(sharedKey(k))) // has a fixed column
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
     .slice(0, MAX_TRACKING_COLUMNS);
+}
+
+/** Same normalisation as form fields ("WhatsApp No" -> "whatsapp"). */
+const sharedKey = (k: string) => canonicalFieldKey(toFieldKey(k));
+
+/** Tracking keys in view that belong to a fixed column under another name (e.g. "whatsapp no"). */
+export async function trackingAbsorbed(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<Absorbed> {
+  const where: Prisma.Sql[] = [leadScopeSql(ctx)];
+  if (scope.clientId) where.push(Prisma.sql`l.client_id = ${scope.clientId}`);
+  if (scope.lpId) where.push(Prisma.sql`l.lp_id = ${scope.lpId}`);
+  const rows = await prisma.$queryRaw<{ k: string }[]>(Prisma.sql`
+    SELECT DISTINCT k FROM (
+      SELECT l.tracking FROM leads l WHERE ${Prisma.join(where, " AND ")} ORDER BY l.created_at DESC LIMIT ${TRACKING_SAMPLE}
+    ) t CROSS JOIN LATERAL jsonb_object_keys(t.tracking) k`);
+  const out: Absorbed = {};
+  for (const { k } of rows) if (!STANDARD_KEYS.has(k) && STANDARD_KEYS.has(sharedKey(k))) absorb(out, sharedKey(k), k);
+  return out;
 }
 
 /** Every filterable / sortable field for the current view. */
@@ -216,9 +258,10 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
   const clientIds = clientId ? [clientId] : visibleClientIds(ctx);
   const clientFilter = clientIds === null ? {} : { clientId: { in: clientIds } };
 
-  const [answers, tracking, stages, lps, owners, clients] = await Promise.all([
-    answerFields(ctx, scope),
+  const [{ answers, absorbed }, tracking, trackAbsorbed, stages, lps, owners, clients] = await Promise.all([
+    formFieldGroups(ctx, scope),
     trackingKeys(ctx, { clientId, lpId: scope.lpId }),
+    trackingAbsorbed(ctx, { clientId, lpId: scope.lpId }),
     prisma.pipelineStage.findMany({ where: clientFilter, orderBy: { position: "asc" }, select: { name: true } }),
     prisma.landingPage.findMany({ where: { AND: [lpWhere(ctx), clientId ? { clientId } : {}] }, orderBy: { name: "asc" }, select: { id: true, name: true, client: { select: { name: true } } } }),
     clientId ? prisma.user.findMany({ where: { clientId }, orderBy: { name: "asc" }, select: { id: true, name: true } }) : Promise.resolve([]),
@@ -247,7 +290,7 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
       : []),
     { id: "source", label: "Received via", kind: "choice", group: "Lead", exact: true, options: SOURCES, expr: Prisma.sql`l.source`, sort: Prisma.sql`l.source` },
     ...STANDARD_COLUMNS.map<FieldDef>((c) => {
-      const parts = readKeys(c).flatMap((k) => [Prisma.sql`NULLIF(l.answers ->> ${k}, '')`, Prisma.sql`NULLIF(l.tracking ->> ${k}, '')`]);
+      const parts = columnKeys(c, absorbed, trackAbsorbed).flatMap((k) => [Prisma.sql`NULLIF(l.answers ->> ${k}, '')`, Prisma.sql`NULLIF(l.tracking ->> ${k}, '')`]);
       if (c.fallback === "whatsapp_from_phone") parts.push(Prisma.sql`NULLIF(ltrim(l.phone_normalised, '+'), '')`);
       if (c.fallback === "received_via") {
         parts.push(Prisma.sql`CASE l.source ${Prisma.join(Object.entries(RECEIVED_VIA_LABEL).map(([v, lbl]) => Prisma.sql`WHEN ${v} THEN ${lbl}`), " ")} ELSE l.source END`);

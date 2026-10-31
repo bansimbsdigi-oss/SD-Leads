@@ -74,10 +74,11 @@ export function standardValue(
   c: StandardColumn,
   lead: { answers: unknown; tracking: unknown; phoneNormalised: string | null; source: string },
   format: (v: unknown) => string,
+  keys: string[] = readKeys(c),
 ): string {
   const answers = (lead.answers ?? {}) as Record<string, unknown>;
   const tracking = (lead.tracking ?? {}) as Record<string, unknown>;
-  for (const k of readKeys(c)) {
+  for (const k of keys) {
     for (const v of [answers[k], tracking[k]]) {
       const s = format(v);
       if (s.trim()) return c.fallback === "whatsapp_from_phone" ? formatWhatsApp(s) : s;

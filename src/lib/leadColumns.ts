@@ -1,6 +1,6 @@
 // Column definitions shared by the leads table and CSV export, so the CSV always matches the screen.
 // Column ids match leadQuery field ids, so every column can be sorted.
-import { answerFields, trackingKeys, trackingLabel, type LeadRow } from "@/lib/leadQuery";
+import { columnKeys, formFieldGroups, trackingAbsorbed, trackingKeys, trackingLabel, type LeadRow } from "@/lib/leadQuery";
 import { RECEIVED_VIA_LABEL, STANDARD_COLUMNS, standardValue } from "@/lib/standardColumns";
 import { isSabhiStaff, type Ctx } from "@/lib/tenant";
 
@@ -27,9 +27,11 @@ export function formatAnswer(v: unknown): string {
  */
 export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<Column[]> {
   const singleClient = Boolean(scope.clientId) || !isSabhiStaff(ctx);
-  const [answers, tracking] = await Promise.all([
-    answerFields(ctx, scope),
-    trackingKeys(ctx, { clientId: scope.clientId ?? (isSabhiStaff(ctx) ? undefined : ctx.clientId ?? undefined), lpId: scope.lpId }),
+  const trackScope = { clientId: scope.clientId ?? (isSabhiStaff(ctx) ? undefined : ctx.clientId ?? undefined), lpId: scope.lpId };
+  const [{ answers, absorbed }, tracking, trackAbsorbed] = await Promise.all([
+    formFieldGroups(ctx, scope),
+    trackingKeys(ctx, trackScope),
+    trackingAbsorbed(ctx, trackScope),
   ]);
   const track = (k: string) => (l: LeadRow) => formatAnswer((l.tracking as Record<string, unknown>)[k]);
   return [
@@ -37,7 +39,10 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
     { id: "name", header: "name", value: (l) => l.name ?? "" },
     { id: "phone", header: "Mobile", value: (l) => l.phoneNormalised ?? "" },
     { id: "email", header: "email", value: (l) => l.emailNormalised ?? "" },
-    ...STANDARD_COLUMNS.map<Column>((c) => ({ id: c.id, header: c.header, value: (l) => standardValue(c, l, formatAnswer) })),
+    ...STANDARD_COLUMNS.map<Column>((c) => {
+      const keys = columnKeys(c, absorbed, trackAbsorbed);
+      return { id: c.id, header: c.header, value: (l) => standardValue(c, l, formatAnswer, keys) };
+    }),
     { id: "status", header: "Status", value: (l) => l.status?.name ?? "" },
     { id: "owner", header: "Owner", value: (l) => l.owner?.name ?? "" },
     ...(scope.lpId ? [] : [{ id: "lp", header: "Landing page", value: (l: LeadRow) => l.lp?.name ?? "" }]),

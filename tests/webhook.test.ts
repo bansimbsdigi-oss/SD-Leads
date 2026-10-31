@@ -447,3 +447,46 @@ describe("no duplicate columns", () => {
     expect(cols.filter((c) => c.header.toLowerCase() === "ref")).toHaveLength(1);
   });
 });
+
+describe("one WhatsApp column", () => {
+  beforeEach(resetDb);
+
+  const waColumns = (cols: { header: string }[]) => cols.filter((c) => /whats\s*app/i.test(c.header)).map((c) => c.header);
+
+  it("any WhatsApp spelling fills Formatted WhatsApp Number; opt-ins stay separate", async () => {
+    const { assignFieldKeys } = await import("@/lib/ingest/fieldKeys");
+    expect(assignFieldKeys(["WhatsApp Mobile No.", "Whats App No", "WhatsApp Number (with country code)", "Whatsapp_No"])).toEqual(["whatsapp", "whatsapp", "whatsapp", "whatsapp"]);
+    expect(assignFieldKeys(["WhatsApp opt-in", "Join WhatsApp group", "Formatted WhatsApp Number"])).toEqual(["whatsapp_opt_in", "join_whatsapp_group", "formatted_whatsapp_number"]);
+  });
+
+  it("old leads: WhatsApp saved under other names (or as the second phone) shows in the one column", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client, lp } = await makeClient("vinita");
+    const a = await prisma.lead.create({ data: { clientId: client.id, lpId: lp.id, submissionId: "o1", name: "A", phoneNormalised: "+919876500011", answers: { phone: "9876500011", phone_2: "+91 91234 00000" } } });
+    const b = await prisma.lead.create({ data: { clientId: client.id, lpId: lp.id, submissionId: "o2", name: "B", answers: { whatsapp_mobile_no: "9811100099" } } });
+    await prisma.formField.createMany({
+      data: [
+        { lpId: lp.id, fieldKey: "phone", label: "Mobile", inputType: "tel", role: "phone", position: 1 },
+        { lpId: lp.id, fieldKey: "phone_2", label: "WhatsApp No.", inputType: "tel", role: "phone", position: 2 },
+        { lpId: lp.id, fieldKey: "whatsapp_mobile_no", label: "WhatsApp Mobile No.", inputType: "text", position: 3 },
+      ],
+    });
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const cols = await leadColumns(admin, { clientId: client.id });
+    expect(waColumns(cols)).toEqual(["Formatted WhatsApp Number"]);
+    const wa = cols.find((c) => c.header === "Formatted WhatsApp Number")!;
+    expect([wa.value(a as never), wa.value(b as never)]).toEqual(["919123400000", "919811100099"]);
+  });
+
+  it("a WhatsApp value stored as tracking also goes to the one column", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client, lp } = await makeClient("vinita");
+    const l = await prisma.lead.create({ data: { clientId: client.id, lpId: lp.id, submissionId: "t1", name: "T", tracking: { "whatsapp no": "9811100088" } } });
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const cols = await leadColumns(admin, { clientId: client.id });
+    expect(waColumns(cols)).toEqual(["Formatted WhatsApp Number"]);
+    expect(cols.find((c) => c.header === "Formatted WhatsApp Number")!.value(l as never)).toBe("919811100088");
+  });
+});
