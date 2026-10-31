@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { BLANK, MAX_FILTER_VALUES, OPS, RANGES, type Condition, type FieldMeta, type RangeId } from "@/lib/leadFilterSpec";
+import { canonicalFieldKey } from "@/lib/ingest/fieldKeys";
 import { isSabhiStaff, leadScopeSql, lpWhere, visibleClientIds, type Ctx } from "@/lib/tenant";
 
 export const PAGE_SIZES = [25, 50, 100, 250, 500, 1000] as const;
@@ -104,29 +105,39 @@ export const naiveUtc = (d: Date) => Prisma.sql`${d.toISOString().replace("Z", "
 
 // ---------- Fields ----------
 
-export type AnswerField = { key: string; label: string; inputType: string; options: string[] };
+/** One column. `keys` are every stored field key that means the same thing (e.g. email_address, email). */
+export type AnswerField = { key: string; keys: string[]; label: string; inputType: string; options: string[] };
 
-/** Form fields for the leads in view: one LP, or the union of all the client's LPs. */
+/** Core role fields have their own Name / Phone / Email columns. */
+const CORE_KEYS = new Set(["name", "phone", "email"]);
+
+/**
+ * Form-field columns for the leads in view: one LP, one client, or every client the user can see.
+ * Fields are merged by their shared key, so "Email"/"E-mail"/"Email Address" never make extra columns.
+ */
 export async function answerFields(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<AnswerField[]> {
   const clientId = scope.clientId ?? (isSabhiStaff(ctx) ? undefined : ctx.clientId ?? undefined);
-  if (!scope.lpId && !clientId) return [];
+  const lpFilter = scope.lpId ? { id: scope.lpId } : clientId ? { clientId } : {};
   const fields = await prisma.formField.findMany({
-    where: { isHidden: false, role: null, lp: { AND: [lpWhere(ctx), scope.lpId ? { id: scope.lpId } : { clientId }] } },
+    where: { isHidden: false, role: null, lp: { AND: [lpWhere(ctx), lpFilter] } },
     orderBy: [{ position: "asc" }, { firstSeenAt: "asc" }],
   });
   const byKey = new Map<string, AnswerField & { lastSeen: number }>();
   for (const f of fields) {
+    const key = canonicalFieldKey(f.fieldKey);
+    if (CORE_KEYS.has(key)) continue;
     const label = f.displayLabel || f.label;
     const options = Array.isArray(f.options) ? (f.options as unknown[]).map(String) : [];
-    const existing = byKey.get(f.fieldKey);
+    const existing = byKey.get(key);
     if (!existing) {
-      byKey.set(f.fieldKey, { key: f.fieldKey, label, inputType: f.inputType, options, lastSeen: f.lastSeenAt.getTime() });
+      byKey.set(key, { key, keys: [f.fieldKey], label, inputType: f.inputType, options, lastSeen: f.lastSeenAt.getTime() });
     } else {
+      if (!existing.keys.includes(f.fieldKey)) existing.keys.push(f.fieldKey);
       existing.options = [...new Set([...existing.options, ...options])];
       if (f.lastSeenAt.getTime() > existing.lastSeen) Object.assign(existing, { label, lastSeen: f.lastSeenAt.getTime() });
     }
   }
-  return [...byKey.values()].map((f) => ({ key: f.key, label: f.label, inputType: f.inputType, options: f.options }));
+  return [...byKey.values()].map((f) => ({ key: f.key, keys: f.keys, label: f.label, inputType: f.inputType, options: f.options }));
 }
 
 type FieldDef = FieldMeta & {
@@ -194,7 +205,13 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
   ];
 
   for (const a of answers) {
-    const expr = Prisma.sql`(l.answers ->> ${a.key})`;
+    // Several stored keys can feed one column: use the first filled one.
+    const expr =
+      a.keys.length === 1
+        ? Prisma.sql`(l.answers ->> ${a.keys[0]})`
+        : Prisma.sql`COALESCE(${Prisma.join(a.keys.map((k) => Prisma.sql`NULLIF(l.answers ->> ${k}, '')`), ", ")})`;
+    const json =
+      a.keys.length === 1 ? Prisma.sql`(l.answers -> ${a.keys[0]})` : Prisma.sql`COALESCE(${Prisma.join(a.keys.map((k) => Prisma.sql`l.answers -> ${k}`), ", ")})`;
     defs.push({
       id: `a:${a.key}`,
       label: a.label,
@@ -202,8 +219,8 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
       group: "Form",
       options: a.options.length ? a.options.map((o) => ({ value: o, label: o })) : undefined,
       expr,
-      answerKey: a.key,
-      json: Prisma.sql`(l.answers -> ${a.key})`,
+      answerKey: a.keys.length === 1 ? a.keys[0] : undefined, // GIN containment needs a single key
+      json,
       num: Prisma.sql`(CASE WHEN ${expr} ~ '^\\s*-?[0-9]+(\\.[0-9]+)?\\s*$' THEN btrim(${expr})::numeric END)`,
       sort: Prisma.sql`lower(${expr})`,
     });

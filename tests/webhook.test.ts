@@ -171,3 +171,49 @@ describe("scale and multi-client safety", () => {
     expect(after.map((f) => f.lastSeenAt.getTime())).toEqual(before.map((f) => f.lastSeenAt.getTime()));
   });
 });
+
+describe("envelope payloads", () => {
+  it("lifts answers out of data{} and treats the outer name as the form's name (Webflow style)", () => {
+    const n = normaliseWebhookBody({
+      name: "General Contact Form",
+      site: "62749158efef318abc8d5a0f",
+      id: "6321a1b0c12c3e5f",
+      submittedAt: "2026-10-31T08:01:00Z",
+      data: { Name: "Alex Morgan", Email: "alex@morgan.io", Phone: "9811100003", Message: "Need a quote", "Page URL": "https://lax.example.com/index.html" },
+    });
+    expect(n.formName).toBe("General Contact Form");
+    expect(n.submissionId).toBe("6321a1b0c12c3e5f");
+    expect(n.fields.map((f) => [f.key, f.role])).toEqual([["Name", "name"], ["Email", "email"], ["Phone", "phone"], ["Message", null]]);
+    expect(n.pageUrl).toBe("https://lax.example.com/index.html");
+    expect(n.tracking).toMatchObject({ site: "62749158efef318abc8d5a0f", submittedat: "2026-10-31T08:01:00Z" });
+  });
+
+  it("leaves flat bodies and lead.js / Elementor shapes alone", () => {
+    expect(normaliseWebhookBody({ name: "Asha", phone: "98765" }).fields.map((f) => f.key)).toEqual(["name", "phone"]);
+    expect(normaliseWebhookBody({ fields: [{ key: "q", value: "x" }] }).fields).toHaveLength(1);
+  });
+});
+
+describe("merged columns", () => {
+  beforeEach(resetDb);
+
+  it("one column per field across landing pages and clients, also for All clients", async () => {
+    const { answerFields } = await import("@/lib/leadQuery");
+    const { makeUser } = await import("./helpers");
+    const a = await makeClient("alpha");
+    const b = await makeClient("beta");
+    await ingestClientWebhook(a.client, { "Full Name": "A", "Email Address": "a@x.com", City: "Pune", Budget: "5L+", "Page URL": "https://alpha.com/one" });
+    await ingestClientWebhook(a.client, { name: "B", EMAIL: "b@x.com", "Your City": "Delhi", "Page URL": "https://alpha.com/two" });
+    await ingestClientWebhook(b.client, { name: "C", email: "c@x.com", city: "Goa", Message: "hi", "Page URL": "https://beta.com/p" });
+
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const all = await answerFields(admin, {});
+    expect(all.map((f) => f.key).sort()).toEqual(["budget", "city", "message"]); // name/email are core columns, city merged
+    const one = await answerFields(admin, { clientId: a.client.id });
+    expect(one.map((f) => f.key).sort()).toEqual(["budget", "city"]);
+
+    // Email variants filled the core Email column, so nothing landed only in answers.
+    const leads = await prisma.lead.findMany({ orderBy: { createdAt: "asc" } });
+    expect(leads.map((l) => [l.name, l.emailNormalised])).toEqual([["A", "a@x.com"], ["B", "b@x.com"], ["C", "c@x.com"]]);
+  });
+});

@@ -90,3 +90,18 @@ describe("chart axis", () => {
     expect(niceAxis(9).ticks).toEqual([0, 3, 6, 9, 12]);
   });
 });
+
+describe("same field, one key", () => {
+  it("maps spellings of the same question to one key", async () => {
+    const { assignFieldKeys } = await import("@/lib/ingest/fieldKeys");
+    expect(assignFieldKeys(["Email", "EMAIL", "email"])).toEqual(["email", "email_2", "email_3"]); // same submission: still kept apart
+    expect(assignFieldKeys(["E-mail"])).toEqual(["email"]);
+    expect(assignFieldKeys(["Email Address"])).toEqual(["email"]);
+    expect(assignFieldKeys(["Your Email"])).toEqual(["email"]);
+    expect(assignFieldKeys(["Mobile Number"])).toEqual(["phone"]);
+    expect(assignFieldKeys(["WhatsApp No"])).toEqual(["phone"]);
+    expect(assignFieldKeys(["Full Name"])).toEqual(["name"]);
+    expect(assignFieldKeys(["Company Name"])).toEqual(["company"]);
+    expect(assignFieldKeys(["Budget"])).toEqual(["budget"]);
+  });
+});

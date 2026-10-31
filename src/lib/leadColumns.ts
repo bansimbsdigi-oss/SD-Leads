@@ -39,7 +39,10 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
     ...answers.map<Column>((f) => ({
       id: `a:${f.key}`,
       header: f.label,
-      value: (l) => formatAnswer((l.answers as Record<string, unknown>)[f.key]),
+      value: (l) => {
+        const answers = l.answers as Record<string, unknown>;
+        return formatAnswer(f.keys.map((k) => answers[k]).find((v) => v !== undefined && v !== null && v !== "") ?? "");
+      },
     })),
     { id: "score", header: "Score", value: (l) => (l.totalScore ?? "").toString() },
     { id: "t:utm_source", header: "utm_source", value: track("utm_source") },

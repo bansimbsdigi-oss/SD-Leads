@@ -10,6 +10,9 @@ import type { IngestField, IngestPayload } from "./schema";
 
 const DEDUPE_WINDOW_DAYS = 30;
 
+// Fields whose shared key is name / phone / email feed the core columns even without a data-role.
+const CORE_ROLE_KEYS = new Set(["name", "phone", "email"]);
+
 export type PreparedField = IngestField & { key: string; role: FieldRole | null };
 
 /** Applies key rules and role detection (data-role, else input type). */
@@ -19,7 +22,9 @@ export function prepareFields(fields: IngestField[]): PreparedField[] {
     ...f,
     key: keys[i],
     type: f.type.toLowerCase(),
-    role: f.role ?? (f.type === "tel" ? "phone" : f.type === "email" ? "email" : null),
+    role:
+      f.role ??
+      (f.type === "tel" ? "phone" : f.type === "email" ? "email" : CORE_ROLE_KEYS.has(keys[i]) ? (keys[i] as FieldRole) : null),
   }));
 }
 

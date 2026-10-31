@@ -89,11 +89,52 @@ export type NormalisedWebhook = {
   lpKey: string | null;
 };
 
+// Envelope formats (Webflow, some Pabbly/Zapier/Make setups) put the answers in a nested object and use
+// the top-level "name"/"title" for the FORM's name: { name: "Contact Form", data: { Name, Email, ... } }.
+const ENVELOPE_KEYS = ["data", "payload", "submission", "form_data", "formdata", "form_response", "entry", "values", "answers", "fields_data"];
+const FORM_NAME_KEYS = ["name", "form_name", "formname", "form", "title", "form_title"];
+
+function isPlainObject(v: Json | undefined): v is Obj {
+  return Boolean(v) && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Lifts the answers out of an envelope. Returns null when the body isn't one. */
+export function unwrapEnvelope(body: Obj): { body: Obj; formName: string | null; meta: Record<string, string> } | null {
+  const lower = new Map(Object.keys(body).map((k) => [k.toLowerCase(), k]));
+  const envKey = ENVELOPE_KEYS.map((k) => lower.get(k)).find((k) => k && isPlainObject(body[k]) && Object.keys(body[k] as Obj).length > 0);
+  if (!envKey) return null;
+  const inner = body[envKey] as Obj;
+  let formName: string | null = null;
+  const meta: Record<string, string> = {};
+  const lifted: Obj = { ...inner };
+  for (const [k, v] of Object.entries(body)) {
+    if (k === envKey) continue;
+    const lk = k.toLowerCase();
+    if (FORM_NAME_KEYS.includes(lk)) {
+      formName ??= str(isPlainObject(v) ? v.name : v) ?? null;
+    } else if (lk === "submission_id" || lk === "id" || lk === "_id") {
+      lifted.submission_id ??= v; // the tool's own id makes its retries idempotent
+    } else if (TRACKING_KEYS.has(lk) || META_ALIASES[lk] || CONTROL_KEYS.has(lk)) {
+      lifted[k] ??= v; // handled by the normal rules below
+    } else if (!isPlainObject(v) && !Array.isArray(v) && str(v)) {
+      meta[lk.slice(0, 60)] = str(v)!.slice(0, 500); // e.g. site, submittedAt: context, not answers
+    }
+  }
+  return { body: lifted, formName, meta };
+}
+
 /** Converts any supported body into fields + tracking. */
-export function normaliseWebhookBody(body: Obj): NormalisedWebhook {
+export function normaliseWebhookBody(rawBody: Obj): NormalisedWebhook {
   const tracking: Record<string, string> = {};
   const fields: IngestField[] = [];
   let formName: string | null = null;
+  let body = rawBody;
+  const envelope = Array.isArray(rawBody.fields) || isPlainObject(rawBody.fields) ? null : unwrapEnvelope(rawBody);
+  if (envelope) {
+    body = envelope.body;
+    formName = envelope.formName;
+    Object.assign(tracking, envelope.meta);
+  }
 
   const addTracking = (k: string, v: Json | undefined) => {
     const s = str(v);
