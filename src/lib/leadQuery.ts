@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { BLANK, MAX_FILTER_VALUES, OPS, RANGES, type Condition, type FieldMeta, type RangeId } from "@/lib/leadFilterSpec";
 import { canonicalFieldKey } from "@/lib/ingest/fieldKeys";
+import { RECEIVED_VIA_LABEL, STANDARD_COLUMNS, STANDARD_KEYS } from "@/lib/standardColumns";
 import { isSabhiStaff, leadScopeSql, lpWhere, visibleClientIds, type Ctx } from "@/lib/tenant";
 
 export const PAGE_SIZES = [25, 50, 100, 250, 500, 1000] as const;
@@ -125,7 +126,7 @@ export async function answerFields(ctx: Ctx, scope: { clientId?: string; lpId?: 
   const byKey = new Map<string, AnswerField & { lastSeen: number }>();
   for (const f of fields) {
     const key = canonicalFieldKey(f.fieldKey);
-    if (CORE_KEYS.has(key)) continue;
+    if (CORE_KEYS.has(key) || STANDARD_KEYS.has(key) || STANDARD_KEYS.has(f.fieldKey)) continue; // has a fixed column
     const label = f.displayLabel || f.label;
     const options = Array.isArray(f.options) ? (f.options as unknown[]).map(String) : [];
     const existing = byKey.get(key);
@@ -190,6 +191,7 @@ export async function trackingKeys(ctx: Ctx, scope: { clientId?: string; lpId?: 
   };
   return rows
     .map((r) => r.k)
+    .filter((k) => !STANDARD_KEYS.has(k)) // has a fixed column
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
     .slice(0, MAX_TRACKING_COLUMNS);
 }
@@ -210,9 +212,9 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
   ]);
 
   const defs: FieldDef[] = [
-    { id: "name", label: "Name", kind: "text", group: "Lead", expr: Prisma.sql`l.name`, sort: Prisma.sql`lower(l.name)` },
-    { id: "phone", label: "Phone", kind: "text", group: "Lead", expr: Prisma.sql`l.phone_normalised`, sort: Prisma.sql`l.phone_normalised` },
-    { id: "email", label: "Email", kind: "text", group: "Lead", expr: Prisma.sql`l.email_normalised`, sort: Prisma.sql`l.email_normalised` },
+    { id: "name", label: "name", kind: "text", group: "Lead", expr: Prisma.sql`l.name`, sort: Prisma.sql`lower(l.name)` },
+    { id: "phone", label: "Mobile", kind: "text", group: "Lead", expr: Prisma.sql`l.phone_normalised`, sort: Prisma.sql`l.phone_normalised` },
+    { id: "email", label: "email", kind: "text", group: "Lead", expr: Prisma.sql`l.email_normalised`, sort: Prisma.sql`l.email_normalised` },
     {
       id: "status", label: "Status", kind: "choice", group: "Lead",
       options: [...new Set(stages.map((s) => s.name))].map((n) => ({ value: n, label: n })),
@@ -229,7 +231,16 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
     ...(clients.length
       ? [{ id: "client", label: "Client", kind: "choice" as const, group: "Lead" as const, exact: true, options: clients.map((c) => ({ value: c.id, label: c.name })), expr: Prisma.sql`l.client_id`, sort: Prisma.sql`lower(c.name)` }]
       : []),
-    { id: "source", label: "Source", kind: "choice", group: "Lead", exact: true, options: SOURCES, expr: Prisma.sql`l.source`, sort: Prisma.sql`l.source` },
+    { id: "source", label: "Received via", kind: "choice", group: "Lead", exact: true, options: SOURCES, expr: Prisma.sql`l.source`, sort: Prisma.sql`l.source` },
+    ...STANDARD_COLUMNS.map<FieldDef>((c) => {
+      const parts = c.keys.flatMap((k) => [Prisma.sql`NULLIF(l.answers ->> ${k}, '')`, Prisma.sql`NULLIF(l.tracking ->> ${k}, '')`]);
+      if (c.fallback === "whatsapp_from_phone") parts.push(Prisma.sql`NULLIF(ltrim(l.phone_normalised, '+'), '')`);
+      if (c.fallback === "received_via") {
+        parts.push(Prisma.sql`CASE l.source ${Prisma.join(Object.entries(RECEIVED_VIA_LABEL).map(([v, lbl]) => Prisma.sql`WHEN ${v} THEN ${lbl}`), " ")} ELSE l.source END`);
+      }
+      const expr = Prisma.sql`COALESCE(${Prisma.join(parts, ", ")})`;
+      return { id: c.id, label: c.header, kind: "text", group: "Lead", expr, sort: Prisma.sql`lower(${expr})` };
+    }),
     { id: "duplicate", label: "Duplicate", kind: "bool", group: "Lead", expr: Prisma.sql`l.is_duplicate::text`, num: Prisma.sql`l.is_duplicate`, sort: Prisma.sql`l.is_duplicate` },
     { id: "score", label: "Quiz score", kind: "number", group: "Lead", expr: Prisma.sql`l.total_score::text`, num: Prisma.sql`l.total_score`, sort: Prisma.sql`l.total_score` },
   ];

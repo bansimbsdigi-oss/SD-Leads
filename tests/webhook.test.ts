@@ -306,12 +306,14 @@ describe("tracking columns", () => {
     });
     const admin = await makeUser("SUPER_ADMIN", null);
     const cols = await leadColumns(admin, {});
+    // utm_placement and fbp have fixed columns; only Page URL is an extra tracking column.
     const tracking = cols.filter((c) => c.id.startsWith("t:")).map((c) => c.header);
-    expect(tracking).toEqual(["Page URL", "utm_placement", "fbp"]);
+    expect(tracking).toEqual(["Page URL"]);
     const lead = await prisma.lead.findFirstOrThrow();
-    expect(cols.find((c) => c.id === "t:fbp")!.value(lead as never)).toBe("fb.1.17885892574.31368");
+    expect(cols.find((c) => c.header === "Fbp")!.value(lead as never)).toBe("fb.1.17885892574.31368");
+    expect(cols.find((c) => c.header === "utm_placement")!.value(lead as never)).toBe("feed");
     expect(lead.answers).not.toHaveProperty("utm_placement"); // utm_* counts as tracking
-    expect(cols.some((c) => c.header === "Pixel_ID")).toBe(true); // other form fields stay columns
+    expect(cols.find((c) => c.header === "Pixel_ID")!.value(lead as never)).toBe("1079024314651914");
   });
 
   it("a condition on a tracking field no lead has yet matches nothing, not everything", async () => {
@@ -321,5 +323,60 @@ describe("tracking columns", () => {
     if (!r.ok) throw new Error("expected ok");
     expect(await leadMatchesConditions(client.id, r.leadId, [{ field: "t:utm_source", op: "is", value: "meta" }])).toBe(false);
     expect(await leadMatchesConditions(client.id, r.leadId, [{ field: "t:utm_source", op: "empty" }])).toBe(true);
+  });
+});
+
+describe("fixed column layout", () => {
+  beforeEach(resetDb);
+
+  const HEADERS = [
+    "Date of Registration", "name", "Mobile", "email", "tag", "Formatted WhatsApp Number", "Source",
+    "utm_term", "utm_source", "utm_content", "utm_campaign", "utm_placement", "fbclid", "gclid", "utm_medium",
+    "Zoom Direct LInk", "Zoom Direct Button", "Zoom Webinar Link", "Zoom Webinar Button", "New Zoom Direct Link", "New Zoom Direct Button",
+    "Fbc", "Fbp", "Pixel_ID", "Source_Platform", "Timestamp", "IP Address", "UserAgent", "AccessT", "Campaign_ID", "Adset_ID", "Ad_ID",
+  ];
+
+  it("starts with the fixed columns in order for every client, extras at the end", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client } = await makeClient("vinita");
+    const r = await ingestClientWebhook(client, {
+      Name: "Divya", Mobile: "9876500011", Email: "d@x.com", Tag: "Hot",
+      "Zoom Direct LInk": "https://zoom.us/j/1", "Pixel_ID": "107902", client_ip_address: "157.48.1.1",
+      client_user_agent: "Mozilla/5.0", event_time: "1793437516", Campaign_ID: "c1", "Ad Set ID": "s1",
+      Budget: "5L+", "Page URL": "https://vinita.com/masterclass",
+    });
+    if (!r.ok) throw new Error("expected ok");
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const cols = await leadColumns(admin, { clientId: client.id });
+    expect(cols.slice(0, HEADERS.length).map((c) => c.header)).toEqual(HEADERS);
+    const rest = cols.slice(HEADERS.length).map((c) => c.header);
+    expect(rest.slice(0, 5)).toEqual(["Status", "Owner", "Landing page", "Received via", "Score"]);
+    expect(rest.slice(5)).toEqual(["Budget", "Page URL"]); // anything else goes at the end
+
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: r.leadId } });
+    const v = (h: string) => cols.find((c) => c.header === h)!.value(lead as never);
+    expect([v("name"), v("Mobile"), v("email"), v("tag")]).toEqual(["Divya", "+919876500011", "d@x.com", "Hot"]);
+    expect(v("Formatted WhatsApp Number")).toBe("919876500011"); // built from Mobile
+    expect(v("Source")).toBe("Webhook"); // no source sent: how it arrived
+    expect([v("Zoom Direct LInk"), v("Pixel_ID"), v("IP Address"), v("UserAgent"), v("Timestamp")]).toEqual([
+      "https://zoom.us/j/1", "107902", "157.48.1.1", "Mozilla/5.0", "1793437516",
+    ]);
+    expect([v("Campaign_ID"), v("Adset_ID")]).toEqual(["c1", "s1"]);
+  });
+
+  it("fixed columns can be filtered and sorted like any other", async () => {
+    const { leadFieldDefs, queryLeads } = await import("@/lib/leadQuery");
+    const { makeUser } = await import("./helpers");
+    const { client } = await makeClient("vinita");
+    await ingestClientWebhook(client, { name: "A", email: "a@x.com", source: "Instagram" });
+    await ingestClientWebhook(client, { name: "B", email: "b@x.com" });
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const defs = await leadFieldDefs(admin, { clientId: client.id });
+    const q = (conditions: { field: string; op: "is"; value: string }[]) =>
+      queryLeads(admin, { clientId: client.id, conditions, dir: "asc", sort: "s:source", page: 1, pageSize: 25 }, defs);
+    expect((await q([{ field: "s:source", op: "is", value: "Instagram" }])).rows.map((l) => l.name)).toEqual(["A"]);
+    expect((await q([{ field: "s:source", op: "is", value: "webhook" }])).rows.map((l) => l.name)).toEqual(["B"]);
+    expect((await q([])).rows.map((l) => l.name)).toEqual(["A", "B"]); // "Instagram" < "Webhook"
   });
 });

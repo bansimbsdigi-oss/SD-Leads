@@ -1,6 +1,7 @@
 // Column definitions shared by the leads table and CSV export, so the CSV always matches the screen.
 // Column ids match leadQuery field ids, so every column can be sorted.
 import { answerFields, trackingKeys, trackingLabel, type LeadRow } from "@/lib/leadQuery";
+import { RECEIVED_VIA_LABEL, STANDARD_COLUMNS, standardValue } from "@/lib/standardColumns";
 import { isSabhiStaff, type Ctx } from "@/lib/tenant";
 
 export type Column = { id: string; header: string; value: (lead: LeadRow) => string };
@@ -20,8 +21,10 @@ export function formatAnswer(v: unknown): string {
   return String(v);
 }
 
-const SOURCE_LABEL: Record<string, string> = { lp: "LP snippet", webhook: "Webhook", meta_instant_form: "Meta form" };
-
+/**
+ * Column order: the fixed layout (lib/standardColumns) shared by every client, then the tool's own
+ * columns, then any other form field or tracking detail the leads in view carry.
+ */
 export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<Column[]> {
   const singleClient = Boolean(scope.clientId) || !isSabhiStaff(ctx);
   const [answers, tracking] = await Promise.all([
@@ -30,15 +33,17 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
   ]);
   const track = (k: string) => (l: LeadRow) => formatAnswer((l.tracking as Record<string, unknown>)[k]);
   return [
-    { id: "created_at", header: "Created", value: (l) => formatDateTime(l.createdAt) },
-    { id: "name", header: "Name", value: (l) => l.name ?? "" },
-    { id: "phone", header: "Phone", value: (l) => l.phoneNormalised ?? "" },
-    { id: "email", header: "Email", value: (l) => l.emailNormalised ?? "" },
+    { id: "created_at", header: "Date of Registration", value: (l) => formatDateTime(l.createdAt) },
+    { id: "name", header: "name", value: (l) => l.name ?? "" },
+    { id: "phone", header: "Mobile", value: (l) => l.phoneNormalised ?? "" },
+    { id: "email", header: "email", value: (l) => l.emailNormalised ?? "" },
+    ...STANDARD_COLUMNS.map<Column>((c) => ({ id: c.id, header: c.header, value: (l) => standardValue(c, l, formatAnswer) })),
     { id: "status", header: "Status", value: (l) => l.status?.name ?? "" },
     { id: "owner", header: "Owner", value: (l) => l.owner?.name ?? "" },
     ...(scope.lpId ? [] : [{ id: "lp", header: "Landing page", value: (l: LeadRow) => l.lp?.name ?? "" }]),
     ...(singleClient ? [] : [{ id: "client", header: "Client", value: (l: LeadRow) => l.client.name }]),
-    { id: "source", header: "Source", value: (l) => SOURCE_LABEL[l.source] ?? l.source },
+    { id: "source", header: "Received via", value: (l) => RECEIVED_VIA_LABEL[l.source] ?? l.source },
+    { id: "score", header: "Score", value: (l) => (l.totalScore ?? "").toString() },
     ...answers.map<Column>((f) => ({
       id: `a:${f.key}`,
       header: f.label,
@@ -47,7 +52,6 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
         return formatAnswer(f.keys.map((k) => answers[k]).find((v) => v !== undefined && v !== null && v !== "") ?? "");
       },
     })),
-    { id: "score", header: "Score", value: (l) => (l.totalScore ?? "").toString() },
     ...tracking.map<Column>((k) => ({ id: `t:${k}`, header: trackingLabel(k), value: track(k) })),
   ];
 }
