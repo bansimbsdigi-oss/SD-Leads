@@ -127,3 +127,19 @@ describe("columns that differ only by underscores", () => {
     ]);
   });
 });
+
+describe("number fields", () => {
+  it("recognise the many names a phone number field gets", async () => {
+    const { isPhoneLikeKey, toFieldKey } = await import("@/lib/ingest/fieldKeys");
+    const yes = ["Number", "Contact", "Mob No", "Mobile No.", "Alternate Number", "Cell", "Contact Details No", "WhatsApp", "Whatsappnumber", "Your Number"];
+    const no = ["Roll Number", "Number of kids", "Pin Code", "Order No", "Aadhar Number", "Email", "WhatsApp Group Link", "Company"];
+    expect(yes.filter((n) => !isPhoneLikeKey(toFieldKey(n)))).toEqual([]);
+    expect(no.filter((n) => isPhoneLikeKey(toFieldKey(n)))).toEqual([]);
+  });
+
+  it("phone numbers sent as JSON numbers still count", async () => {
+    const { normalisePhone } = await import("@/lib/ingest/normalise");
+    expect(normalisePhone(9876543210)).toBe("+919876543210");
+    expect(normalisePhone(919876543210)).toBe("+919876543210");
+  });
+});

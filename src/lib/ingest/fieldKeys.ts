@@ -40,6 +40,21 @@ const CANONICAL = new Map(Object.entries(SYNONYMS).flatMap(([key, alts]) => alts
 const WHATSAPP_NAME = /(^|_)whats_?app/;
 const NOT_A_NUMBER = /formatted|opt|consent|link|button|group|community|channel|message|msg|status|chat|updates/;
 
+// Other names for a phone number: "Number", "Mob No", "Contact", "Alternate Number", "Cell". Only treated
+// as the phone when the value really is a phone number (the caller checks), so "Roll Number" etc. stay.
+const PHONE_NAME = /(^|_)(phone|mobile|mob|cell|tel|telephone|contact|number|num|no|whats_?app\w*)(_|$)/;
+const NOT_PHONE_WORDS = new Set([
+  "of", "count", "age", "pin", "pincode", "zip", "postal", "code", "otp", "order", "roll", "id", "invoice", "amount",
+  "year", "date", "time", "house", "flat", "room", "seat", "ticket", "aadhar", "aadhaar", "pan", "gst", "account",
+  "card", "policy", "registration", "reg", "email", "mail", "name",
+]);
+
+/** A normalised key that names some kind of phone number. */
+export function isPhoneLikeKey(key: string): boolean {
+  if (!PHONE_NAME.test(key) || NOT_A_NUMBER.test(key)) return false;
+  return !key.split("_").some((w) => NOT_PHONE_WORDS.has(w));
+}
+
 /** The shared key for a normalised field key ("email_address" -> "email", "whatsapp_mobile_no" -> "whatsapp"). */
 export function canonicalFieldKey(key: string): string {
   const known = CANONICAL.get(key);

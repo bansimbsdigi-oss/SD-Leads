@@ -3,7 +3,7 @@ import { Prisma, type FieldRole, type LandingPage } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { adjustDailyCounts } from "@/lib/dailyCounts";
 import { enqueue } from "@/lib/queue";
-import { assignFieldKeys, formVersionHash, toFieldKey } from "./fieldKeys";
+import { assignFieldKeys, formVersionHash, isPhoneLikeKey, toFieldKey } from "./fieldKeys";
 import { normaliseEmail, normalisePhone } from "./normalise";
 import { buildSearchText } from "./searchText";
 import type { IngestField, IngestPayload } from "./schema";
@@ -37,7 +37,9 @@ export function prepareFields(fields: IngestField[]): PreparedField[] {
     const key = keys[i];
     const role: FieldRole | null =
       f.role ??
-      (f.type === "tel" ? "phone" : f.type === "email" ? "email" : key === "whatsapp" ? "phone" : CORE_ROLE_KEYS.has(key) ? (key as FieldRole) : null);
+      (f.type === "tel" ? "phone" : f.type === "email" ? "email" : key === "whatsapp" ? "phone" : CORE_ROLE_KEYS.has(key) ? (key as FieldRole) : null) ??
+      // "Number", "Contact", "Mob No"…: any number field holding a real phone number fills Mobile.
+      (isPhoneLikeKey(key) && normalisePhone(f.value) ? "phone" : null);
     const current = merged.get(key);
     if (!current) {
       merged.set(key, { ...f, key, type: f.type.toLowerCase(), role });
@@ -53,7 +55,7 @@ export function prepareFields(fields: IngestField[]): PreparedField[] {
   return [...merged.values()];
 }
 
-const textValue = (f: PreparedField) => (typeof f.value === "string" ? f.value.trim() : "");
+const textValue = (f: PreparedField) => (typeof f.value === "string" ? f.value.trim() : typeof f.value === "number" ? String(f.value) : "");
 
 /**
  * First email / phone that is actually valid, so a "yes" or a blank field can't hide the real one.
@@ -96,7 +98,7 @@ export async function registerFields(
   const now = new Date();
   const existing = await tx.formField.findMany({
     where: { lpId: lp.id },
-    select: { fieldKey: true, label: true, inputType: true, options: true, lastSeenAt: true },
+    select: { fieldKey: true, label: true, inputType: true, options: true, role: true, lastSeenAt: true },
   });
   const byKey = new Map(existing.map((f) => [f.fieldKey, f]));
 
@@ -130,6 +132,7 @@ export async function registerFields(
     if (current.inputType !== f.type) changes.inputType = f.type;
     if (realLabel && realLabel !== current.label) changes.label = realLabel;
     if (f.options && JSON.stringify(f.options) !== JSON.stringify(current.options)) changes.options = f.options;
+    if (!current.role && f.role === "phone") changes.role = "phone"; // a number field found to hold phone numbers
     if (Object.keys(changes).length) {
       await tx.formField.updateMany({ where: { lpId: lp.id, fieldKey: f.key }, data: { ...changes, lastSeenAt: now } });
     } else if (now.getTime() - current.lastSeenAt.getTime() > LAST_SEEN_REFRESH_MS) {

@@ -2,6 +2,7 @@ import { parsePhoneNumberFromString } from "libphonenumber-js";
 
 /** E.164 phone, defaulting to India (+91) for national numbers. Null when unparseable. */
 export function normalisePhone(raw: unknown): string | null {
+  if (typeof raw === "number" && Number.isSafeInteger(raw)) raw = String(raw); // webhooks often send 9876543210 unquoted
   if (typeof raw !== "string") return null;
   let s = raw.trim().replace(/[^\d+]/g, "");
   if (!s) return null;

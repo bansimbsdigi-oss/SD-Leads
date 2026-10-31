@@ -379,6 +379,29 @@ describe("fixed column layout", () => {
     expect(leads.map((l) => eventCols[0].value(l as never))).toEqual(["evt_1", "evt_2"]);
   });
 
+  it("every number field fills Mobile, whatever it's called, instead of its own column", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client } = await makeClient("vinita");
+    const sent = [
+      { Name: "A", "Contact Number": "98765 00031" },
+      { Name: "B", Number: 9876500032 }, // unquoted number
+      { Name: "C", "WhatsApp No": "+91 98765 00033" },
+      { Name: "D", "Mob No": "09876500034", "Roll Number": "12345" },
+    ];
+    for (const body of sent) {
+      const r = await ingestClientWebhook(client, body);
+      if (!r.ok) throw new Error("expected ok");
+    }
+    const leads = await prisma.lead.findMany({ where: { clientId: client.id }, orderBy: { name: "asc" } });
+    expect(leads.map((l) => l.phoneNormalised)).toEqual(["+919876500031", "+919876500032", "+919876500033", "+919876500034"]);
+
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const headers = (await leadColumns(admin, { clientId: client.id })).map((c) => c.header);
+    expect(headers.filter((h) => /contact|^number$|mob no|whatsapp no/i.test(h))).toEqual([]);
+    expect(headers).toContain("Roll Number"); // not a phone number: keeps its column
+  });
+
   it("fixed columns can be filtered and sorted like any other", async () => {
     const { leadFieldDefs, queryLeads } = await import("@/lib/leadQuery");
     const { makeUser } = await import("./helpers");
