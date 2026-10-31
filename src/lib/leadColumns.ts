@@ -49,10 +49,13 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
       header: f.label,
       value: (l) => {
         const answers = l.answers as Record<string, unknown>;
-        return formatAnswer(f.keys.map((k) => answers[k]).find((v) => v !== undefined && v !== null && v !== "") ?? "");
+        const tracking = l.tracking as Record<string, unknown>;
+        const v = [...f.keys.map((k) => answers[k]), tracking[f.key]].find((x) => x !== undefined && x !== null && x !== "");
+        return formatAnswer(v ?? "");
       },
     })),
-    ...tracking.map<Column>((k) => ({ id: `t:${k}`, header: trackingLabel(k), value: track(k) })),
+    // A key that is also a form answer already has that column.
+    ...tracking.filter((k) => !answers.some((a) => a.key === k)).map<Column>((k) => ({ id: `t:${k}`, header: trackingLabel(k), value: track(k) })),
   ];
 }
 

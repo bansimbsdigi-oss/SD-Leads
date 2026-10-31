@@ -4,8 +4,8 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { BLANK, MAX_FILTER_VALUES, OPS, RANGES, type Condition, type FieldMeta, type RangeId } from "@/lib/leadFilterSpec";
-import { canonicalFieldKey } from "@/lib/ingest/fieldKeys";
-import { RECEIVED_VIA_LABEL, STANDARD_COLUMNS, STANDARD_KEYS } from "@/lib/standardColumns";
+import { canonicalFieldKey, toFieldKey } from "@/lib/ingest/fieldKeys";
+import { readKeys, RECEIVED_VIA_LABEL, STANDARD_COLUMNS, STANDARD_KEYS } from "@/lib/standardColumns";
 import { isSabhiStaff, leadScopeSql, lpWhere, visibleClientIds, type Ctx } from "@/lib/tenant";
 
 export const PAGE_SIZES = [25, 50, 100, 250, 500, 1000] as const;
@@ -113,6 +113,20 @@ export type AnswerField = { key: string; keys: string[]; label: string; inputTyp
 const CORE_KEYS = new Set(["name", "phone", "email"]);
 
 /**
+ * Column a stored field belongs to. Older leads stored a field sent twice as "ref_2" / "utm_placement_2" /
+ * "phone_2"; such a copy joins the column its label names ("Ref", "UTM_Placement", "WhatsApp No.").
+ * Numbered questions (q_1, q_2 with their own labels) stay separate.
+ */
+function groupKey(fieldKey: string, label: string): string {
+  const key = canonicalFieldKey(fieldKey);
+  const copy = /^(.+)_\d+$/.exec(fieldKey);
+  if (!copy) return key;
+  const fromLabel = canonicalFieldKey(toFieldKey(label));
+  if (fromLabel === canonicalFieldKey(copy[1]) || CORE_KEYS.has(fromLabel) || STANDARD_KEYS.has(fromLabel)) return fromLabel;
+  return key;
+}
+
+/**
  * Form-field columns for the leads in view: one LP, one client, or every client the user can see.
  * Fields are merged by their shared key, so "Email"/"E-mail"/"Email Address" never make extra columns.
  */
@@ -125,7 +139,7 @@ export async function answerFields(ctx: Ctx, scope: { clientId?: string; lpId?: 
   });
   const byKey = new Map<string, AnswerField & { lastSeen: number }>();
   for (const f of fields) {
-    const key = canonicalFieldKey(f.fieldKey);
+    const key = groupKey(f.fieldKey, f.label);
     if (CORE_KEYS.has(key) || STANDARD_KEYS.has(key) || STANDARD_KEYS.has(f.fieldKey)) continue; // has a fixed column
     const label = f.displayLabel || f.label;
     const options = Array.isArray(f.options) ? (f.options as unknown[]).map(String) : [];
@@ -233,7 +247,7 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
       : []),
     { id: "source", label: "Received via", kind: "choice", group: "Lead", exact: true, options: SOURCES, expr: Prisma.sql`l.source`, sort: Prisma.sql`l.source` },
     ...STANDARD_COLUMNS.map<FieldDef>((c) => {
-      const parts = c.keys.flatMap((k) => [Prisma.sql`NULLIF(l.answers ->> ${k}, '')`, Prisma.sql`NULLIF(l.tracking ->> ${k}, '')`]);
+      const parts = readKeys(c).flatMap((k) => [Prisma.sql`NULLIF(l.answers ->> ${k}, '')`, Prisma.sql`NULLIF(l.tracking ->> ${k}, '')`]);
       if (c.fallback === "whatsapp_from_phone") parts.push(Prisma.sql`NULLIF(ltrim(l.phone_normalised, '+'), '')`);
       if (c.fallback === "received_via") {
         parts.push(Prisma.sql`CASE l.source ${Prisma.join(Object.entries(RECEIVED_VIA_LABEL).map(([v, lbl]) => Prisma.sql`WHEN ${v} THEN ${lbl}`), " ")} ELSE l.source END`);
@@ -245,12 +259,18 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
     { id: "score", label: "Quiz score", kind: "number", group: "Lead", expr: Prisma.sql`l.total_score::text`, num: Prisma.sql`l.total_score`, sort: Prisma.sql`l.total_score` },
   ];
 
+  const answerSet = new Set(answers.map((a) => a.key));
+  const trackingSet = new Set(tracking);
   for (const a of answers) {
     // Several stored keys can feed one column: use the first filled one.
+    const fromTracking = trackingSet.has(a.key);
     const expr =
-      a.keys.length === 1
+      a.keys.length === 1 && !fromTracking
         ? Prisma.sql`(l.answers ->> ${a.keys[0]})`
-        : Prisma.sql`COALESCE(${Prisma.join(a.keys.map((k) => Prisma.sql`NULLIF(l.answers ->> ${k}, '')`), ", ")})`;
+        : Prisma.sql`COALESCE(${Prisma.join(
+            [...a.keys.map((k) => Prisma.sql`NULLIF(l.answers ->> ${k}, '')`), ...(fromTracking ? [Prisma.sql`NULLIF(l.tracking ->> ${a.key}, '')`] : [])],
+            ", ",
+          )})`;
     const json =
       a.keys.length === 1 ? Prisma.sql`(l.answers -> ${a.keys[0]})` : Prisma.sql`COALESCE(${Prisma.join(a.keys.map((k) => Prisma.sql`l.answers -> ${k}`), ", ")})`;
     defs.push({
@@ -260,13 +280,14 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
       group: "Form",
       options: a.options.length ? a.options.map((o) => ({ value: o, label: o })) : undefined,
       expr,
-      answerKey: a.keys.length === 1 ? a.keys[0] : undefined, // GIN containment needs a single key
+      answerKey: a.keys.length === 1 && !fromTracking ? a.keys[0] : undefined, // GIN containment needs a single key
       json,
       num: Prisma.sql`(CASE WHEN ${expr} ~ '^\\s*-?[0-9]+(\\.[0-9]+)?\\s*$' THEN btrim(${expr})::numeric END)`,
       sort: Prisma.sql`lower(${expr})`,
     });
   }
   for (const key of tracking) {
+    if (answerSet.has(key)) continue; // same field also arrives as a form answer: one column
     const expr = Prisma.sql`(l.tracking ->> ${key})`;
     defs.push({ id: `t:${key}`, label: trackingLabel(key), kind: "text", group: "Tracking", expr, sort: Prisma.sql`lower(${expr})` });
   }

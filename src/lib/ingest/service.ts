@@ -16,23 +16,52 @@ const CORE_ROLE_KEYS = new Set(["name", "phone", "email"]);
 export type PreparedField = IngestField & { key: string; role: FieldRole | null };
 
 /** Applies key rules and role detection (data-role, else input type). */
+const isBlank = (v: unknown) => v === null || v === undefined || (typeof v === "string" && !v.trim()) || (Array.isArray(v) && v.length === 0);
+
+/** Two values of the same field: keep the first filled one; different text is kept as "a, b". */
+function mergeValues(a: IngestField["value"], b: IngestField["value"], keepFirst: boolean): IngestField["value"] {
+  if (isBlank(a)) return b;
+  if (isBlank(b) || keepFirst) return a;
+  if (Array.isArray(a) || Array.isArray(b)) return [...new Set([...[a].flat(), ...[b].flat()].map(String))];
+  if (typeof a === "string" && typeof b === "string") {
+    return a.trim().toLowerCase() === b.trim().toLowerCase() ? a : `${a}, ${b}`;
+  }
+  return a;
+}
+
+/** Applies key rules and role detection (data-role, else input type / shared key); merges repeated fields. */
 export function prepareFields(fields: IngestField[]): PreparedField[] {
   const keys = assignFieldKeys(fields.map((f) => f.key));
-  return fields.map((f, i) => ({
-    ...f,
-    key: keys[i],
-    type: f.type.toLowerCase(),
-    role:
+  const merged = new Map<string, PreparedField>();
+  fields.forEach((f, i) => {
+    const key = keys[i];
+    const role: FieldRole | null =
       f.role ??
-      (f.type === "tel" ? "phone" : f.type === "email" ? "email" : CORE_ROLE_KEYS.has(keys[i]) ? (keys[i] as FieldRole) : null),
-  }));
+      (f.type === "tel" ? "phone" : f.type === "email" ? "email" : key === "whatsapp" ? "phone" : CORE_ROLE_KEYS.has(key) ? (key as FieldRole) : null);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, { ...f, key, type: f.type.toLowerCase(), role });
+      return;
+    }
+    // Contact fields keep their first value (two numbers joined would be neither); others keep both.
+    current.value = mergeValues(current.value, f.value, CORE_ROLE_KEYS.has(key) || key === "whatsapp");
+    current.role ??= role;
+    if (!current.label?.trim()) current.label = f.label;
+    current.options ??= f.options;
+    if (current.score == null) current.score = f.score;
+  });
+  return [...merged.values()];
 }
 
 const textValue = (f: PreparedField) => (typeof f.value === "string" ? f.value.trim() : "");
 
-/** First email / phone that is actually valid, so a "yes" or a blank field can't hide the real one. */
+/**
+ * First email / phone that is actually valid, so a "yes" or a blank field can't hide the real one.
+ * The phone prefers a real phone field; a WhatsApp number is only used when there's none.
+ */
 function firstValid(fields: PreparedField[], role: "email" | "phone", normalise: (v: string) => string | null): string | null {
-  for (const f of fields) {
+  const ordered = [...fields].sort((a, b) => Number(a.key === "whatsapp") - Number(b.key === "whatsapp"));
+  for (const f of ordered) {
     if (f.role !== role) continue;
     const v = textValue(f) && normalise(textValue(f));
     if (v) return v;

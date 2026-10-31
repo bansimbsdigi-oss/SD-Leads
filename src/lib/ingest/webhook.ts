@@ -72,7 +72,7 @@ const CONTROL_KEYS = new Set(["submission_id", "lp", "lp_key", "turnstile_token"
 export function guessRole(key: string, label = ""): IngestField["role"] {
   const shared = [key, label].filter(Boolean).map((x) => canonicalFieldKey(toFieldKey(x)));
   if (shared.includes("email")) return "email";
-  if (shared.includes("phone")) return "phone";
+  if (shared.includes("phone") || shared.includes("whatsapp")) return "phone";
   if (shared.includes("name") || shared.includes("first_name")) return "name";
   // Looser spellings, e.g. "Email (work)", "Name as on ID", "Phone (with country code)".
   const parts = [key, label].filter(Boolean).map((x) => x.toLowerCase().replace(/[_-]+/g, " ").trim());

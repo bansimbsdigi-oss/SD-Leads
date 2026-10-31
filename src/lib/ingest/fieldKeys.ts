@@ -21,9 +21,11 @@ const SYNONYMS: Record<string, string[]> = {
   email: ["e_mail", "email_address", "emailaddress", "email_id", "emailid", "your_email", "your_email_address", "mail", "mail_id"],
   phone: [
     "phone_number", "phonenumber", "phone_no", "mobile", "mobile_number", "mobilenumber", "mobile_no", "mobileno",
-    "contact_number", "contact_no", "whatsapp", "whatsapp_number", "whatsapp_no", "tel", "telephone", "cell",
+    "contact_number", "contact_no", "tel", "telephone", "cell",
     "cell_phone", "your_phone", "your_mobile", "your_phone_number", "your_mobile_number",
   ],
+  // Its own field: fills "Formatted WhatsApp Number", and stands in for the phone only when there's no Mobile.
+  whatsapp: ["whatsapp_number", "whatsapp_no", "whatsappno", "whatsapp_num", "whatsapp_mobile", "wa_number", "your_whatsapp", "your_whatsapp_number"],
   name: ["full_name", "fullname", "your_name", "your_full_name"],
   first_name: ["firstname", "fname", "given_name"],
   last_name: ["lastname", "lname", "surname", "family_name"],
@@ -36,17 +38,12 @@ const CANONICAL = new Map(Object.entries(SYNONYMS).flatMap(([key, alts]) => alts
 /** The shared key for a normalised field key ("email_address" -> "email"). */
 export const canonicalFieldKey = (key: string) => CANONICAL.get(key) ?? key;
 
-/** Normalises keys (incl. common synonyms) and suffixes duplicates within one submission: q, q_2, q_3. */
+/**
+ * Normalised keys (incl. common synonyms). The same field sent twice in one submission ("utm_placement"
+ * and "UTM_Placement") gets the same key and is merged by the caller: never a second "_2" column.
+ */
 export function assignFieldKeys(names: string[]): string[] {
-  const seen = new Map<string, number>();
-  return names.map((name) => {
-    const base = canonicalFieldKey(toFieldKey(name));
-    const count = (seen.get(base) ?? 0) + 1;
-    seen.set(base, count);
-    if (count === 1) return base;
-    const suffix = `_${count}`;
-    return base.slice(0, MAX_KEY_LENGTH - suffix.length) + suffix;
-  });
+  return names.map((name) => canonicalFieldKey(toFieldKey(name)));
 }
 
 /** Form version = hash of the sorted key:type pairs. */

@@ -380,3 +380,70 @@ describe("fixed column layout", () => {
     expect((await q([])).rows.map((l) => l.name)).toEqual(["A", "B"]); // "Instagram" < "Webhook"
   });
 });
+
+describe("no duplicate columns", () => {
+  beforeEach(resetDb);
+
+  it("merges the same field sent twice in one submission instead of adding a _2 copy", async () => {
+    const { client } = await makeClient("vinita");
+    const r = await ingestClientWebhook(client, {
+      name: "Divya", phone: "9876500011", Phone: "9123400000",
+      ref: "Ref", REF: "fb-ad", utm_placement: "", UTM_Placement: "feed", UTM_source: "meta",
+    });
+    if (!r.ok) throw new Error("expected ok");
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: r.leadId } });
+    expect(lead.phoneNormalised).toBe("+919876500011"); // contact fields keep the first value
+    expect(lead.answers).toMatchObject({ ref: "Ref, fb-ad" }); // different text: both kept, one field
+    expect(Object.keys(lead.answers as object).some((k) => /_\d+$/.test(k))).toBe(false);
+    expect(lead.tracking).toMatchObject({ utm_placement: "feed", utm_source: "meta" });
+    const fields = await prisma.formField.findMany({ where: { lpId: lead.lpId! } });
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["name", "phone", "ref"]);
+  });
+
+  it("WhatsApp fills the Formatted WhatsApp Number column; Mobile stays the phone", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client } = await makeClient("vinita");
+    const both = await ingestClientWebhook(client, { name: "A", Mobile: "9876500011", "WhatsApp No.": "+91 91234 00000" });
+    const onlyWa = await ingestClientWebhook(client, { name: "B", "WhatsApp Number": "9811100099" });
+    if (!both.ok || !onlyWa.ok) throw new Error("expected ok");
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const cols = await leadColumns(admin, { clientId: client.id });
+    expect(cols.filter((c) => /whatsapp/i.test(c.header)).map((c) => c.header)).toEqual(["Formatted WhatsApp Number"]);
+    const wa = cols.find((c) => c.header === "Formatted WhatsApp Number")!;
+    const a = await prisma.lead.findUniqueOrThrow({ where: { id: both.leadId } });
+    const b = await prisma.lead.findUniqueOrThrow({ where: { id: onlyWa.leadId } });
+    expect([a.phoneNormalised, wa.value(a as never)]).toEqual(["+919876500011", "919123400000"]);
+    expect([b.phoneNormalised, wa.value(b as never)]).toEqual(["+919811100099", "919811100099"]); // WhatsApp used as phone
+  });
+
+  it("old leads with _2 copies show in one column, numbered questions stay apart", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client, lp } = await makeClient("vinita");
+    const answers = { name: "Old", ref: "", ref_2: "Ref", utm_placement: "", utm_placement_2: "feed", phone_2: "9123400000", q_1: "a", q_2: "b" };
+    const lead = await prisma.lead.create({ data: { clientId: client.id, lpId: lp.id, submissionId: "old", name: "Old", answers } });
+    const reg = (fieldKey: string, label: string, position: number) => ({ lpId: lp.id, fieldKey, label, inputType: "text", position });
+    await prisma.formField.createMany({
+      data: [reg("ref", "ref", 1), reg("ref_2", "Ref", 2), reg("utm_placement", "utm_placement", 3), reg("utm_placement_2", "UTM_placement", 4),
+        reg("phone_2", "WhatsApp No.", 5), reg("q_1", "How often do you post?", 6), reg("q_2", "Which platform?", 7)],
+    });
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const cols = await leadColumns(admin, { clientId: client.id });
+    const extra = cols.slice(cols.findIndex((c) => c.header === "Score") + 1).map((c) => c.header);
+    expect(extra).toEqual(["ref", "How often do you post?", "Which platform?"]);
+    expect(cols.find((c) => c.header === "ref")!.value(lead as never)).toBe("Ref");
+    expect(cols.find((c) => c.header === "utm_placement")!.value(lead as never)).toBe("feed");
+  });
+
+  it("a field that arrives as both an answer and a tracking detail is one column", async () => {
+    const { leadColumns } = await import("@/lib/leadColumns");
+    const { makeUser } = await import("./helpers");
+    const { client } = await makeClient("vinita");
+    await ingestClientWebhook(client, { name: "A", email: "a@x.com", ref: "Ref" });
+    await ingestClientWebhook(client, { name: "B", email: "b@x.com", data: { name: "B", ref2: "x" }, ref: "from-envelope" }); // envelope: outer ref -> tracking
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const cols = await leadColumns(admin, { clientId: client.id });
+    expect(cols.filter((c) => c.header.toLowerCase() === "ref")).toHaveLength(1);
+  });
+});

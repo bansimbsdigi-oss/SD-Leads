@@ -15,8 +15,8 @@ describe("field keys", () => {
     expect(toFieldKey("submission_id")).toBe("submission_id_field");
     expect(toFieldKey("LP")).toBe("lp_field");
   });
-  it("suffixes duplicates within one submission", () => {
-    expect(assignFieldKeys(["q", "Q", "q", "city"])).toEqual(["q", "q_2", "q_3", "city"]);
+  it("gives repeated fields the same key (merged, never a _2 column)", () => {
+    expect(assignFieldKeys(["q", "Q", "q", "city"])).toEqual(["q", "q", "q", "city"]);
   });
   it("version hash ignores order but not types", () => {
     const a = formVersionHash([{ key: "a", type: "text" }, { key: "b", type: "tel" }]);
@@ -94,12 +94,12 @@ describe("chart axis", () => {
 describe("same field, one key", () => {
   it("maps spellings of the same question to one key", async () => {
     const { assignFieldKeys } = await import("@/lib/ingest/fieldKeys");
-    expect(assignFieldKeys(["Email", "EMAIL", "email"])).toEqual(["email", "email_2", "email_3"]); // same submission: still kept apart
+    expect(assignFieldKeys(["Email", "EMAIL", "email"])).toEqual(["email", "email", "email"]);
     expect(assignFieldKeys(["E-mail"])).toEqual(["email"]);
     expect(assignFieldKeys(["Email Address"])).toEqual(["email"]);
     expect(assignFieldKeys(["Your Email"])).toEqual(["email"]);
     expect(assignFieldKeys(["Mobile Number"])).toEqual(["phone"]);
-    expect(assignFieldKeys(["WhatsApp No"])).toEqual(["phone"]);
+    expect(assignFieldKeys(["WhatsApp No"])).toEqual(["whatsapp"]);
     expect(assignFieldKeys(["Full Name"])).toEqual(["name"]);
     expect(assignFieldKeys(["Company Name"])).toEqual(["company"]);
     expect(assignFieldKeys(["Budget"])).toEqual(["budget"]);
