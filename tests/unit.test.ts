@@ -100,6 +100,8 @@ describe("same field, one key", () => {
     expect(assignFieldKeys(["Your Email"])).toEqual(["email"]);
     expect(assignFieldKeys(["Mobile Number"])).toEqual(["phone"]);
     expect(assignFieldKeys(["WhatsApp No"])).toEqual(["whatsapp"]);
+    expect(assignFieldKeys(["Whatsappnumber", "WhatsappNo"])).toEqual(["whatsapp", "whatsapp"]);
+    expect(assignFieldKeys(["Whatsapp Group Link"])).toEqual(["whatsapp_group_link"]);
     expect(assignFieldKeys(["Full Name"])).toEqual(["name"]);
     expect(assignFieldKeys(["Company Name"])).toEqual(["company"]);
     expect(assignFieldKeys(["Budget"])).toEqual(["budget"]);

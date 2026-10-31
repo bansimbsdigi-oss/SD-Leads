@@ -36,8 +36,8 @@ const SYNONYMS: Record<string, string[]> = {
 const CANONICAL = new Map(Object.entries(SYNONYMS).flatMap(([key, alts]) => alts.map((a) => [a, key] as const)));
 
 // Any other field named after WhatsApp ("WhatsApp Mobile No.", "Whats App No", "WhatsApp Number (with
-// country code)") is the WhatsApp number too, unless it's clearly not a number.
-const WHATSAPP_NAME = /(^|_)whats_?app(_|$)/;
+// country code)", "Whatsappnumber") is the WhatsApp number too, unless it's clearly not a number.
+const WHATSAPP_NAME = /(^|_)whats_?app/;
 const NOT_A_NUMBER = /formatted|opt|consent|link|button|group|community|channel|message|msg|status|chat|updates/;
 
 /** The shared key for a normalised field key ("email_address" -> "email", "whatsapp_mobile_no" -> "whatsapp"). */
