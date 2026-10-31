@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { createClient, createLp, createUser, deleteClient, deleteLeads, getClient, getLead, getLp, listClients, listLeads, listLps } from "@/lib/data";
+import { createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, getClient, getLead, getLp, listClients, listLeads, listLps } from "@/lib/data";
 import { ingestPayloadSchema } from "@/lib/ingest/schema";
 import { ingestLead } from "@/lib/ingest/service";
 import { ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -88,6 +88,30 @@ describe("lead deletion", () => {
     expect(await prisma.lead.findUnique({ where: { id: leadA } })).toBeNull();
     expect(await prisma.lead.findUnique({ where: { id: leadB } })).not.toBeNull();
     expect(await prisma.auditLog.count({ where: { action: "lead.delete", target: leadA } })).toBe(1);
+  });
+
+  it("select all leads (every page) deletes only what matches, in scope, loaded before", async () => {
+    const { parseLeadQuery } = await import("@/lib/leadQuery");
+    const a = await makeClient("alpha");
+    const b = await makeClient("beta");
+    const named = (name: string, phone: string) =>
+      payload({ fields: [{ key: "name", type: "text", label: "Name", role: "name", value: name }, { key: "phone", type: "tel", label: "Mobile", role: "phone", value: phone }] });
+    for (const [n, p] of [["Ravi One", "9876500101"], ["Ravi Two", "9876500102"], ["Meena", "9876500103"]]) await ingestLead(a.lp, ingestPayloadSchema.parse(named(n, p)));
+    await ingestLead(b.lp, ingestPayloadSchema.parse(named("Ravi Beta", "9876500104")));
+    const upto = new Date();
+    await new Promise((r) => setTimeout(r, 5));
+    const late = (await ingestLead(a.lp, ingestPayloadSchema.parse(named("Ravi Late", "9876500105")))).leadId;
+
+    // Client admin of alpha, search "ravi", all pages: both alpha Ravis go; beta's and the late one stay.
+    const adminA = await makeUser("CLIENT_ADMIN", a.client.id);
+    expect((await deleteMatchingLeads(adminA, parseLeadQuery({ q: "ravi" }), upto)).deleted).toBe(2);
+    const left = await prisma.lead.findMany({ select: { name: true }, orderBy: { name: "asc" } });
+    expect(left.map((l) => l.name)).toEqual(["Meena", "Ravi Beta", "Ravi Late"]);
+    expect(await prisma.lead.findUnique({ where: { id: late } })).not.toBeNull();
+
+    // A member can't delete at all.
+    const member = await makeUser("CLIENT_MEMBER", a.client.id, { lpIds: [a.lp.id] });
+    await expect(deleteMatchingLeads(member, parseLeadQuery({}), new Date())).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it("clears duplicate links pointing at a deleted lead", async () => {

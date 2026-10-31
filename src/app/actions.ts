@@ -7,7 +7,7 @@ import { z } from "zod";
 import { Prisma, type Role } from "@prisma/client";
 import { signIn, signOut } from "@/auth";
 import { prisma } from "@/lib/db";
-import { audit, createClient, createLp, createUser, deleteClient, deleteLeads, getLp, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
+import { audit, createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, getLp, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
 import { requireCtx } from "@/lib/session";
 import type { Condition } from "@/lib/leadFilterSpec";
 import {
@@ -18,6 +18,7 @@ import {
   setWebhookStatus,
   updateWebhookRule,
 } from "@/lib/outbound/webhooks";
+import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
 
 export type ActionState = { error?: string; ok?: string } | undefined;
@@ -169,7 +170,14 @@ export async function deleteLeadAction(fd: FormData) {
 /** Bulk delete from the leads table (checkboxes named "ids"). */
 export async function deleteLeadsAction(fd: FormData) {
   const ctx = await requireCtx();
-  await deleteLeads(ctx, fd.getAll("ids").map(String).filter(Boolean));
+  if (fd.get("all") === "1") {
+    // Every lead matching the filters, on all pages (the query string the list was showing).
+    const upto = new Date(str(fd, "upto"));
+    if (Number.isNaN(upto.getTime())) throw new Error("The list is out of date. Reload the page and try again.");
+    await deleteMatchingLeads(ctx, parseLeadQuery(Object.fromEntries(new URLSearchParams(str(fd, "query")))), upto);
+  } else {
+    await deleteLeads(ctx, fd.getAll("ids").map(String).filter(Boolean));
+  }
   revalidatePath("/leads");
 }
 

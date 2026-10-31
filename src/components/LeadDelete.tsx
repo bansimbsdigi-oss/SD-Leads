@@ -74,30 +74,55 @@ export function SelectAllCheckbox() {
   );
 }
 
-/** "Delete selected" bar; the row checkboxes belong to this form. */
-export function BulkDeleteBar() {
-  const { selected } = useSelection();
+/**
+ * "Delete selected" bar; the row checkboxes belong to this form. With every row on the page ticked it
+ * offers to select all `total` leads matching the filters, on every page (`query` is the list's filters,
+ * `upto` when the list was loaded).
+ */
+export function BulkDeleteBar({ total, capped, query, upto }: { total: number; capped: boolean; query: string; upto: string }) {
+  const { selected, total: onPage } = useSelection();
+  const [allPages, setAllPages] = useState(false);
+  const pageFull = onPage > 0 && selected === onPage;
+  const all = allPages && pageFull; // unticking a row goes back to "this page only"
+  const totalLabel = `${total.toLocaleString("en-IN")}${capped ? "+" : ""}`;
+  const count = all ? totalLabel : String(selected);
+
+  function clear() {
+    boxes().forEach((b) => (b.checked = false));
+    setAllPages(false);
+    window.dispatchEvent(new Event(CHANGED));
+  }
+
   return (
     <form
       id={FORM_ID}
       action={deleteLeadsAction}
       onSubmit={(e) => {
-        if (!confirm(`Delete ${selected} lead${selected === 1 ? "" : "s"}? This cannot be undone.`)) e.preventDefault();
+        const ok = all
+          ? prompt(`Delete ALL ${totalLabel} leads matching the current filters, on every page? This cannot be undone.\n\nType DELETE to confirm.`)?.trim().toUpperCase() === "DELETE"
+          : confirm(`Delete ${selected} lead${selected === 1 ? "" : "s"}? This cannot be undone.`);
+        if (!ok) e.preventDefault();
       }}
-      className={selected ? "mb-3 flex items-center gap-3 rounded-md bg-red-50 px-3 py-2 text-sm" : "hidden"}
+      className={selected ? "mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-red-50 px-3 py-2 text-sm" : "hidden"}
     >
-      <span className="font-medium text-red-800">{selected} selected</span>
-      <Button type="submit" variant="danger" size="sm">Delete selected</Button>
-      <button
-        type="button"
-        className="text-slate-600 hover:underline"
-        onClick={() => {
-          boxes().forEach((b) => (b.checked = false));
-          window.dispatchEvent(new Event(CHANGED));
-        }}
-      >
-        Cancel
-      </button>
+      {all && (
+        <>
+          <input type="hidden" name="all" value="1" />
+          <input type="hidden" name="query" value={query} />
+          <input type="hidden" name="upto" value={upto} />
+        </>
+      )}
+      <span className="font-medium text-red-800">{count} selected</span>
+      <Button type="submit" variant="danger" size="sm">{all ? `Delete all ${totalLabel}` : "Delete selected"}</Button>
+      <button type="button" className="text-slate-600 hover:underline" onClick={clear}>Cancel</button>
+      {pageFull && total > onPage && (
+        <span className="text-slate-700">
+          {all ? `All ${totalLabel} leads matching these filters are selected.` : `All ${onPage} leads on this page are selected.`}{" "}
+          <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => setAllPages(!all)}>
+            {all ? "Select only this page" : `Select all ${totalLabel} leads`}
+          </button>
+        </span>
+      )}
     </form>
   );
 }

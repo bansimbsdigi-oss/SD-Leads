@@ -86,7 +86,13 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
           <>
             {showSelect && (
               <div className="px-4 pt-3 has-[form.hidden]:hidden">
-                <BulkDeleteBar key={`${query.page}-${leads.map((l) => l.id).join()}`} />
+                <BulkDeleteBar
+                  key={`${query.page}-${leads.map((l) => l.id).join()}`}
+                  total={total}
+                  capped={totalCapped}
+                  query={queryToParams(query, { page: undefined, size: undefined, sort: undefined, dir: undefined }).toString()}
+                  upto={new Date().toISOString()}
+                />
               </div>
             )}
             {/* Own scroll box so the header row stays visible while scrolling long pages. */}

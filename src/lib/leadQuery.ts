@@ -530,6 +530,24 @@ export async function queryLeads(ctx: Ctx, query: LeadQuery, defs?: FieldDef[]) 
   return { rows: found, total: Math.min(counted, COUNT_CAP), totalCapped: counted > COUNT_CAP };
 }
 
+/**
+ * One batch of ids of leads matching the query across all pages (id order, after `afterId`). Only leads
+ * created by `upto` (when the user saw the list), so leads arriving meanwhile aren't swept up.
+ */
+export async function matchingLeadIds(
+  ctx: Ctx,
+  query: LeadQuery,
+  defs: FieldDef[],
+  opts: { upto: Date; afterId?: string; limit: number },
+): Promise<string[]> {
+  const whereSql = buildWhere(ctx, query, new Map(defs.map((d) => [d.id, d])));
+  const after = opts.afterId ? Prisma.sql`AND l.id > ${opts.afterId}` : Prisma.empty;
+  const rows = await prisma.$queryRaw<{ id: string }[]>(
+    Prisma.sql`SELECT l.id ${FROM_LEADS} WHERE ${whereSql} AND l.created_at <= ${naiveUtc(opts.upto)} ${after} ORDER BY l.id LIMIT ${opts.limit}`,
+  );
+  return rows.map((r) => r.id);
+}
+
 /** Distinct values are read from at most this many of the newest matching leads. */
 const VALUES_SAMPLE = 50_000;
 const VALUES_LIMIT = 500;

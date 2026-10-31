@@ -4,7 +4,7 @@ import { newWebhookToken } from "@/lib/crypto";
 import { Prisma, type LpStatus, type Role } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { adjustDailyCounts } from "@/lib/dailyCounts";
-import { queryLeads } from "@/lib/leadQuery";
+import { leadFieldDefs, matchingLeadIds, queryLeads, type LeadQuery } from "@/lib/leadQuery";
 import { hashPassword } from "@/lib/password";
 import { can, canSeeClient, clientWhere, ForbiddenError, leadWhere, lpWhere, NotFoundError, type Ctx } from "@/lib/tenant";
 
@@ -258,6 +258,33 @@ export async function deleteLeads(ctx: Ctx, ids: string[]) {
     return removed.length;
   });
   return { deleted: removedCount, clientIds: [...new Set(allowed.map((l) => l.clientId))] };
+}
+
+const DELETE_ALL_MAX = 100_000;
+
+/**
+ * "Select all leads" then delete: every lead matching the leads-screen filters (all pages) that the user
+ * may delete, created by `upto`. Runs in batches of 1000 through deleteLeads (same checks and audit).
+ */
+export async function deleteMatchingLeads(ctx: Ctx, query: LeadQuery, upto: Date) {
+  const defs = query.conditions.length ? await leadFieldDefs(ctx, query) : [];
+  let afterId: string | undefined;
+  let seen = 0;
+  let deleted = 0;
+  while (seen < DELETE_ALL_MAX) {
+    const ids = await matchingLeadIds(ctx, query, defs, { upto, afterId, limit: 1000 });
+    if (!ids.length) break;
+    seen += ids.length;
+    afterId = ids[ids.length - 1];
+    try {
+      deleted += (await deleteLeads(ctx, ids)).deleted;
+    } catch (err) {
+      // A batch of leads this user can't delete (or already gone) is skipped, not fatal.
+      if (!(err instanceof ForbiddenError || err instanceof NotFoundError)) throw err;
+    }
+  }
+  if (seen && !deleted) throw new ForbiddenError();
+  return { deleted };
 }
 
 export function listStages(ctx: Ctx, clientId: string) {
