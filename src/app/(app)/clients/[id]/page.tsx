@@ -5,6 +5,7 @@ import { CopyBox } from "@/components/CopyBox";
 import { DeleteClientDialog } from "@/components/DeleteClientDialog";
 import { EditLpDialog } from "@/components/EditLpDialog";
 import { Avatar, Badge, Button, buttonClass, Card, Empty, PageHeader, tableClass } from "@/components/ui";
+import { EditUserDialog } from "@/components/EditUserDialog";
 import { UserForm } from "@/components/UserForm";
 import { WebhooksCard } from "@/components/WebhooksCard";
 import { getClient, listLps, listUsers } from "@/lib/data";
@@ -141,7 +142,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               ) : (
                 <div className="overflow-x-auto">
                   <table className={tableClass}>
-                    <thead><tr><th>Name</th><th>Role</th><th>Last login</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Role</th><th>Last login</th><th><span className="sr-only">Actions</span></th></tr></thead>
                     <tbody>
                       {users.map((u) => (
                         <tr key={u.id}>
@@ -154,8 +155,21 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                               </span>
                             </span>
                           </td>
-                          <td><Badge tone={u.role === "CLIENT_ADMIN" ? "violet" : "slate"}>{u.role === "CLIENT_ADMIN" ? "Admin" : "Member"}</Badge></td>
+                          <td>
+                            <span className="flex flex-wrap gap-1.5">
+                              <Badge tone={u.role === "CLIENT_ADMIN" ? "violet" : "slate"}>{u.role === "CLIENT_ADMIN" ? "Admin" : "Member"}</Badge>
+                              {u.status === "disabled" && <Badge tone="red">Disabled</Badge>}
+                            </span>
+                          </td>
                           <td className="whitespace-nowrap text-xs text-ink-muted">{u.lastLoginAt ? formatDateTime(u.lastLoginAt) : "Never"}</td>
+                          <td className="text-right">
+                            <EditUserDialog
+                              user={{ ...u, managedClientIds: [], lpIds: u.lpAccess.map((a) => a.lpId) }}
+                              roles={[{ value: "CLIENT_MEMBER", label: "Client member" }, { value: "CLIENT_ADMIN", label: "Client admin" }]}
+                              lps={lps.map((lp) => ({ id: lp.id, name: lp.name }))}
+                              isSelf={u.id === ctx.userId}
+                            />
+                          </td>
                         </tr>
                       ))}
                     </tbody>

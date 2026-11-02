@@ -7,7 +7,7 @@ import { z } from "zod";
 import { Prisma, type Role } from "@prisma/client";
 import { signIn, signOut } from "@/auth";
 import { prisma } from "@/lib/db";
-import { audit, createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, getLp, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
+import { audit, createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, getLp, updateUser, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
 import { requireCtx } from "@/lib/session";
 import type { Condition } from "@/lib/leadFilterSpec";
 import {
@@ -128,6 +128,32 @@ export async function createUserAction(_: ActionState, fd: FormData): Promise<Ac
     }
     revalidatePath(clientId ? `/clients/${clientId}` : "/users");
     return { ok: `Created ${user.email}. Share the temporary password with them securely.` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function updateUserAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  try {
+    const input = z
+      .object({
+        name: z.string().min(2, "Name is required").max(100),
+        email: z.string().email("Enter a valid email"),
+        role: z.enum(["SUPER_ADMIN", "ACCOUNT_MANAGER", "CLIENT_ADMIN", "CLIENT_MEMBER"]),
+        status: z.enum(["active", "disabled"]),
+        password: z.string().max(200),
+      })
+      .parse({ name: str(fd, "name"), email: str(fd, "email"), role: str(fd, "role"), status: str(fd, "status"), password: String(fd.get("password") ?? "") });
+    const { clientId } = await updateUser(ctx, str(fd, "id"), {
+      ...input,
+      role: input.role as Role,
+      password: input.password || undefined,
+      managedClientIds: fd.getAll("managedClientIds").map(String).filter(Boolean),
+      lpIds: fd.getAll("lpIds").map(String).filter(Boolean),
+    });
+    revalidatePath(clientId ? `/clients/${clientId}` : "/users");
+    return { ok: input.password ? "Saved. Share the new password with them securely." : "Saved." };
   } catch (err) {
     return { error: errorMessage(err) };
   }

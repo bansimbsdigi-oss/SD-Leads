@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, getClient, getLead, getLp, listClients, listLeads, listLps } from "@/lib/data";
+import { createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, getClient, updateUser, getLead, getLp, listClients, listLeads, listLps } from "@/lib/data";
 import { ingestPayloadSchema } from "@/lib/ingest/schema";
 import { ingestLead } from "@/lib/ingest/service";
 import { ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -156,5 +156,68 @@ describe("client deletion", () => {
     expect(await prisma.leadDailyCount.count({ where: { clientId: a.client.id } })).toBe(0);
     expect(await prisma.lead.count({ where: { clientId: b.client.id } })).toBe(1);
     expect(await prisma.auditLog.count({ where: { action: "client.delete" } })).toBe(1);
+  });
+});
+
+describe("editing users", () => {
+  beforeEach(resetDb);
+
+  const base = { name: "Yuvraj", email: "yuvraj@sabhi.test", status: "active" as const };
+
+  it("super admin edits a staff login: details, role, clients, password, disable", async () => {
+    const { verifyPassword } = await import("@/lib/password");
+    const a = await makeClient("alpha");
+    const b = await makeClient("beta");
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const am = await makeUser("ACCOUNT_MANAGER", null);
+    await prisma.clientManager.create({ data: { userId: am.userId, clientId: a.client.id } });
+
+    await updateUser(admin, am.userId, { ...base, role: "ACCOUNT_MANAGER", managedClientIds: [b.client.id], password: "new-password-123" });
+    let u = await prisma.user.findUniqueOrThrow({ where: { id: am.userId }, include: { managedClients: true } });
+    expect([u.name, u.email, u.managedClients.map((m) => m.clientId)]).toEqual(["Yuvraj", "yuvraj@sabhi.test", [b.client.id]]);
+    expect(await verifyPassword(u.passwordHash, "new-password-123")).toBe(true);
+
+    // Promoted to super admin: client assignments no longer apply. Blank password keeps it.
+    await updateUser(admin, am.userId, { ...base, role: "SUPER_ADMIN", status: "disabled" });
+    u = await prisma.user.findUniqueOrThrow({ where: { id: am.userId }, include: { managedClients: true } });
+    expect([u.role, u.status, u.managedClients.length]).toEqual(["SUPER_ADMIN", "disabled", 0]);
+    expect(await verifyPassword(u.passwordHash, "new-password-123")).toBe(true);
+    expect(await prisma.auditLog.count({ where: { action: { startsWith: "user.update" }, target: am.userId } })).toBe(2);
+  });
+
+  it("guards: no self lock-out, always one super admin, unique email, staff roles only", async () => {
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const self = await prisma.user.findUniqueOrThrow({ where: { id: admin.userId } });
+    await expect(updateUser(admin, admin.userId, { name: "Me", email: self.email, role: "ACCOUNT_MANAGER", status: "active" })).rejects.toThrow(/own role/);
+    await expect(updateUser(admin, admin.userId, { name: "Me", email: self.email, role: "SUPER_ADMIN", status: "disabled" })).rejects.toThrow(/own role/);
+    await updateUser(admin, admin.userId, { name: "Me renamed", email: self.email, role: "SUPER_ADMIN", status: "active" }); // details are fine
+
+    const other = await makeUser("SUPER_ADMIN", null);
+    await prisma.user.update({ where: { id: other.userId }, data: { status: "disabled" } });
+    const am = await makeUser("ACCOUNT_MANAGER", null);
+    const amUser = await prisma.user.findUniqueOrThrow({ where: { id: am.userId } });
+    await expect(updateUser(admin, am.userId, { name: "AM", email: self.email, role: "ACCOUNT_MANAGER", status: "active" })).rejects.toThrow(/already uses/);
+    await expect(updateUser(admin, am.userId, { name: "AM", email: amUser.email, role: "CLIENT_ADMIN", status: "active" })).rejects.toThrow(/not allowed/);
+    // A second super admin (the AM, promoted) can't demote the first when it'd leave none active... the first is still active, so this is fine:
+    await updateUser(admin, am.userId, { name: "AM", email: amUser.email, role: "SUPER_ADMIN", status: "active" });
+    const amNow = { ...am, role: "SUPER_ADMIN" as const }; // roles are re-read per request in the app
+    await updateUser(amNow, admin.userId, { name: "Me", email: self.email, role: "ACCOUNT_MANAGER", status: "active" });
+    // Now `am` is the only active super admin; nobody can remove that.
+    const third = await makeUser("SUPER_ADMIN", null);
+    await prisma.user.update({ where: { id: third.userId }, data: { status: "disabled" } });
+    await expect(updateUser(third, am.userId, { name: "AM", email: amUser.email, role: "ACCOUNT_MANAGER", status: "active" })).rejects.toThrow(/only active super admin/);
+  });
+
+  it("client admin edits only their own client's users; members get LP access of that client only", async () => {
+    const a = await makeClient("alpha");
+    const b = await makeClient("beta");
+    const adminA = await makeUser("CLIENT_ADMIN", a.client.id);
+    const memberA = await makeUser("CLIENT_MEMBER", a.client.id);
+    const memberB = await makeUser("CLIENT_MEMBER", b.client.id);
+    await updateUser(adminA, memberA.userId, { name: "Asha", email: "asha@alpha.test", role: "CLIENT_MEMBER", status: "active", lpIds: [a.lp.id, b.lp.id] });
+    expect((await prisma.userLpAccess.findMany({ where: { userId: memberA.userId } })).map((x) => x.lpId)).toEqual([a.lp.id]);
+    await expect(updateUser(adminA, memberB.userId, { name: "X", email: "x@b.test", role: "CLIENT_MEMBER", status: "active" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(updateUser(adminA, memberA.userId, { name: "Asha", email: "asha@alpha.test", role: "SUPER_ADMIN", status: "active" })).rejects.toThrow(/not allowed/);
+    await expect(updateUser(memberA, adminA.userId, { name: "A", email: "a@alpha.test", role: "CLIENT_ADMIN", status: "active" })).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

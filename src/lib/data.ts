@@ -149,7 +149,11 @@ export function listUsers(ctx: Ctx, clientId: string | null) {
   return prisma.user.findMany({
     where: { clientId },
     orderBy: { name: "asc" },
-    select: { id: true, name: true, email: true, role: true, status: true, lastLoginAt: true },
+    select: {
+      id: true, name: true, email: true, role: true, status: true, lastLoginAt: true,
+      managedClients: { select: { clientId: true } },
+      lpAccess: { select: { lpId: true } },
+    },
   });
 }
 
@@ -176,6 +180,69 @@ export async function createUser(
   });
   await audit(ctx, "user.create", user.id, input.clientId);
   return user;
+}
+
+export type UserUpdate = {
+  name: string;
+  email: string;
+  role: Role;
+  status: "active" | "disabled";
+  /** Blank keeps the current password. */
+  password?: string;
+  /** Account managers: the clients they look after. */
+  managedClientIds?: string[];
+  /** Client members: the landing pages they see (empty = only leads assigned to them). */
+  lpIds?: string[];
+};
+
+/** Edit a login: details, role, access, active/disabled, optional new password. */
+export async function updateUser(ctx: Ctx, id: string, input: UserUpdate) {
+  const user = await prisma.user.findUnique({ where: { id }, select: { id: true, clientId: true, role: true, status: true } });
+  if (!user || (user.clientId ? !canSeeClient(ctx, user.clientId) : ctx.role !== "SUPER_ADMIN")) throw new NotFoundError("User not found");
+  if (!can.manageUsers(ctx, user.clientId)) throw new ForbiddenError();
+  const allowedRoles = user.clientId ? CLIENT_ROLES : STAFF_ROLES;
+  if (!allowedRoles.includes(input.role)) throw new Error("Role not allowed for this user type");
+  if (input.password && input.password.length < 10) throw new Error("New password must be at least 10 characters");
+
+  // Nobody locks themselves out, and there is always an active super admin left.
+  if (id === ctx.userId && (input.role !== user.role || input.status !== "active")) {
+    throw new Error("You can't change your own role or disable your own login. Ask another super admin.");
+  }
+  const losesSuperAdmin = user.role === "SUPER_ADMIN" && user.status === "active" && (input.role !== "SUPER_ADMIN" || input.status !== "active");
+  if (losesSuperAdmin && (await prisma.user.count({ where: { role: "SUPER_ADMIN", status: "active", id: { not: id } } })) === 0) {
+    throw new Error("This is the only active super admin. Make someone else a super admin first.");
+  }
+
+  const managed = !user.clientId && input.role === "ACCOUNT_MANAGER" ? [...new Set(input.managedClientIds ?? [])] : [];
+  const lpIds =
+    user.clientId && input.role === "CLIENT_MEMBER"
+      ? (await prisma.landingPage.findMany({ where: { id: { in: input.lpIds ?? [] }, clientId: user.clientId }, select: { id: true } })).map((lp) => lp.id)
+      : [];
+  const passwordHash = input.password ? await hashPassword(input.password) : undefined;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id },
+        data: { name: input.name.trim(), email: input.email.trim().toLowerCase(), role: input.role, status: input.status, ...(passwordHash ? { passwordHash } : {}) },
+      });
+      if (!user.clientId) {
+        await tx.clientManager.deleteMany({ where: { userId: id } });
+        if (managed.length) {
+          const clients = await tx.client.findMany({ where: { id: { in: managed } }, select: { id: true } });
+          await tx.clientManager.createMany({ data: clients.map((c) => ({ userId: id, clientId: c.id })) });
+        }
+      } else {
+        await tx.userLpAccess.deleteMany({ where: { userId: id } });
+        if (lpIds.length) await tx.userLpAccess.createMany({ data: lpIds.map((lpId) => ({ userId: id, lpId })) });
+      }
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") throw new Error("Another login already uses that email.");
+    throw err;
+  }
+  await audit(ctx, input.password ? "user.update+password" : "user.update", id, user.clientId);
+  return { clientId: user.clientId };
 }
 
 // ---------- Fields and leads ----------
