@@ -179,3 +179,40 @@ describe("query parsing and IST ranges", () => {
     expect(rangeBounds("6m", now).from.toISOString()).toBe("2026-04-29T18:30:00.000Z");
   });
 });
+
+describe("Date of Registration filters", () => {
+  beforeEach(resetDb);
+
+  it("filters by IST day: on, before, after, between and the column's values list", async () => {
+    const { client, lp } = await makeClient("alpha");
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const at: Record<string, string> = {
+      Early: "2026-10-30T10:00:00Z", // 30 Oct, 15:30 IST
+      Midnight: "2026-10-31T19:00:00Z", // 1 Nov, 00:30 IST (still 31 Oct in UTC)
+      Late: "2026-11-01T18:00:00Z", // 1 Nov, 23:30 IST
+      Next: "2026-11-02T05:00:00Z", // 2 Nov, 10:30 IST
+    };
+    for (const [i, [name, iso]] of Object.entries(at).entries()) {
+      const id = await add(lp, name, `98765001${10 + i}`, []);
+      await prisma.lead.update({ where: { id }, data: { createdAt: new Date(iso) } });
+    }
+    const defs = await leadFieldDefs(admin, { clientId: client.id });
+    const names = async (c: Condition) =>
+      (await queryLeads(admin, base({ clientId: client.id, conditions: [c], sort: "created_at", dir: "asc" }), defs)).rows.map((l) => l.name);
+
+    expect(await names({ field: "created_at", op: "on", value: "2026-11-01" })).toEqual(["Midnight", "Late"]);
+    expect(await names({ field: "created_at", op: "before", value: "2026-11-01" })).toEqual(["Early"]);
+    expect(await names({ field: "created_at", op: "after", value: "2026-11-01" })).toEqual(["Next"]);
+    expect(await names({ field: "created_at", op: "between", value: "2026-10-31..2026-11-01" })).toEqual(["Midnight", "Late"]);
+    expect(await names({ field: "created_at", op: "between", value: "2026-11-02..2026-10-30" })).toEqual(["Early", "Midnight", "Late", "Next"]); // reversed ends
+    expect(await names({ field: "created_at", op: "in", values: ["2026-10-30", "2026-11-02"] })).toEqual(["Early", "Next"]);
+    expect(await names({ field: "created_at", op: "on", value: "2026-02-31" })).toHaveLength(4); // not a date: ignored
+
+    const vals = await columnValues(admin, base({ clientId: client.id }), defs, "created_at");
+    expect(vals?.values.map((v) => [v.value, v.label, v.count])).toEqual([
+      ["2026-11-02", "2 Nov 2026", 1],
+      ["2026-11-01", "1 Nov 2026", 2],
+      ["2026-10-30", "30 Oct 2026", 1],
+    ]);
+  });
+});

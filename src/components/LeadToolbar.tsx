@@ -3,6 +3,7 @@
 import { Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
+import { DateValue } from "@/components/DateValue";
 import { Button, Input, Select } from "@/components/ui";
 import { describeCondition, OPS, RANGES, type Condition, type FieldMeta, type Op } from "@/lib/leadFilterSpec";
 
@@ -206,8 +207,10 @@ export function LeadToolbar({ clients, fields, conditions }: Props) {
                     </Select>
                   </div>
                   {needsValue && (
-                    <div className="w-full sm:w-56">
-                      {f?.options?.length && (c.op === "is" || c.op === "is_not") ? (
+                    <div className={c.op === "between" ? "w-full sm:w-80" : "w-full sm:w-56"}>
+                      {f?.kind === "date" ? (
+                        <DateValue op={c.op} value={c.value ?? ""} onChange={(value) => setCondition(i, { value })} Field={Input} />
+                      ) : f?.options?.length && (c.op === "is" || c.op === "is_not") ? (
                         <Select aria-label="Value" value={c.value ?? ""} onChange={(e) => setCondition(i, { value: e.target.value })}>
                           <option value="">Choose…</option>
                           {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}

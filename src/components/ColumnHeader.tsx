@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { DateValue } from "@/components/DateValue";
 import { Button } from "@/components/ui";
 import { ALWAYS_SHOWN, readHiddenColumns, writeHiddenColumns } from "@/lib/hiddenColumns";
 import { OPS, type Condition, type FieldMeta, type Op } from "@/lib/leadFilterSpec";
@@ -141,7 +142,8 @@ export function ColumnHeader({
     });
   const ops = field ? OPS[field.kind] : [];
   const needsValue = ops.find((o) => o.op === condOp)?.needsValue ?? false;
-  const [asc, desc] = numeric ? ["Sort low → high", "Sort high → low"] : ["Sort A → Z", "Sort Z → A"];
+  const [asc, desc] =
+    field?.kind === "date" ? ["Oldest first", "Newest first"] : numeric ? ["Sort low → high", "Sort high → low"] : ["Sort A → Z", "Sort Z → A"];
   const menuItem = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100";
 
   return (
@@ -201,7 +203,10 @@ export function ColumnHeader({
                       <option value="">None</option>
                       {ops.map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
                     </select>
-                    {condOp && needsValue && (
+                    {condOp && needsValue && field.kind === "date" && (
+                      <DateValue op={condOp} value={condValue} onChange={setCondValue} className="h-8 w-full min-w-0 rounded-md border border-slate-300 px-2 text-sm" />
+                    )}
+                    {condOp && needsValue && field.kind !== "date" && (
                       <input
                         aria-label="Condition value"
                         type={field.kind === "number" ? "number" : "text"}

@@ -3,6 +3,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { saveWebhookAction, testWebhookAction, type ActionState } from "@/app/actions";
+import { DateValue } from "@/components/DateValue";
 import { Button, Hint, Input, Label, Select } from "@/components/ui";
 import { OPS, type Condition, type FieldMeta, type Op } from "@/lib/leadFilterSpec";
 
@@ -58,7 +59,11 @@ function ConditionsEditor({ fields, initial }: { fields: FieldMeta[]; initial: C
                   {ops.map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
                 </Select>
                 {needsValue &&
-                  (f?.options?.length && (c.op === "is" || c.op === "is_not") ? (
+                  (f?.kind === "date" ? (
+                    <span className="min-w-0 flex-1 basis-32">
+                      <DateValue op={c.op} value={c.value ?? ""} onChange={(value) => set(i, { value })} Field={Input} />
+                    </span>
+                  ) : f?.options?.length && (c.op === "is" || c.op === "is_not") ? (
                     <Select aria-label="Value" className="min-w-0 flex-1 basis-32" value={c.value ?? ""} onChange={(e) => set(i, { value: e.target.value })}>
                       <option value="">Choose…</option>
                       {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}

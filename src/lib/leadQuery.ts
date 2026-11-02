@@ -3,7 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { BLANK, MAX_FILTER_VALUES, OPS, RANGES, type Condition, type FieldMeta, type RangeId } from "@/lib/leadFilterSpec";
+import { BLANK, DAY_RE, formatDay, MAX_FILTER_VALUES, OPS, RANGES, splitDateRange, type Condition, type FieldMeta, type RangeId } from "@/lib/leadFilterSpec";
 import { canonicalFieldKey, toFieldKey } from "@/lib/ingest/fieldKeys";
 import { isDroppedKey, looseKey, readKeys, RECEIVED_VIA_LABEL, STANDARD_COLUMNS, STANDARD_KEYS, standardKeyOf, type StandardColumn } from "@/lib/standardColumns";
 import { isSabhiStaff, leadScopeSql, lpWhere, visibleClientIds, type Ctx } from "@/lib/tenant";
@@ -103,6 +103,35 @@ export function rangeBounds(range: RangeId, now = new Date()): { from: Date; to?
 
 // created_at is stored as UTC without a time zone, so compare against naive UTC timestamps.
 export const naiveUtc = (d: Date) => Prisma.sql`${d.toISOString().replace("Z", "")}::timestamp`;
+
+/** Start of an IST day ("2026-11-02") as a UTC instant; null when it isn't a real date. */
+function istDayStart(day: string): Date | null {
+  if (!DAY_RE.test(day)) return null;
+  const [y, m, d] = day.split("-").map(Number);
+  const utc = Date.UTC(y, m - 1, d);
+  if (new Date(utc).getUTCDate() !== d) return null; // e.g. 2026-02-31
+  return new Date(utc - IST_OFFSET_MS);
+}
+const DAY_MS = 86_400_000;
+
+/** Date of Registration on / before / after / between IST days. Plain ranges, so the created_at index serves them. */
+function dateSql(op: string, value: string): Prisma.Sql | null {
+  const [fromDay, toDay] = splitDateRange(value);
+  const from = istDayStart(fromDay);
+  const to = istDayStart(toDay);
+  if (!from || !to) return null;
+  const endOf = (d: Date) => new Date(d.getTime() + DAY_MS);
+  switch (op) {
+    case "on": return Prisma.sql`(l.created_at >= ${naiveUtc(from)} AND l.created_at < ${naiveUtc(endOf(from))})`;
+    case "before": return Prisma.sql`l.created_at < ${naiveUtc(from)}`;
+    case "after": return Prisma.sql`l.created_at >= ${naiveUtc(endOf(from))}`;
+    case "between": {
+      const [a, b] = from <= to ? [from, to] : [to, from];
+      return Prisma.sql`(l.created_at >= ${naiveUtc(a)} AND l.created_at < ${naiveUtc(endOf(b))})`;
+    }
+  }
+  return null;
+}
 
 // ---------- Fields ----------
 
@@ -297,6 +326,8 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
   ]);
 
   const defs: FieldDef[] = [
+    // IST day as text: what the column's values list groups by. Conditions use created_at ranges (dateSql).
+    { id: "created_at", label: "Date of Registration", kind: "date", group: "Lead", expr: Prisma.sql`to_char(l.created_at + interval '330 minutes', 'YYYY-MM-DD')`, sort: Prisma.sql`l.created_at` },
     { id: "name", label: "name", kind: "text", group: "Lead", expr: Prisma.sql`l.name`, sort: Prisma.sql`lower(l.name)` },
     { id: "phone", label: "Mobile", kind: "text", group: "Lead", expr: Prisma.sql`l.phone_normalised`, sort: Prisma.sql`l.phone_normalised` },
     { id: "email", label: "email", kind: "text", group: "Lead", expr: Prisma.sql`l.email_normalised`, sort: Prisma.sql`l.email_normalised` },
@@ -403,10 +434,16 @@ function inSql(def: FieldDef, values: string[]): Prisma.Sql {
 }
 
 function conditionSql(def: FieldDef, c: Condition): Prisma.Sql | null {
+  if (c.op === "in" && def.kind === "date") {
+    // Ticked days in the column's values list.
+    const days = (c.values ?? []).map((v) => dateSql("on", v)).filter((x): x is Prisma.Sql => x !== null);
+    return days.length ? Prisma.sql`(${Prisma.join(days, " OR ")})` : Prisma.sql`FALSE`;
+  }
   if (c.op === "in") return Array.isArray(c.values) ? inSql(def, c.values) : null;
   const allowed = OPS[def.kind].find((o) => o.op === c.op);
   if (!allowed) return null;
   const v = (c.value ?? "").trim();
+  if (def.kind === "date") return v ? dateSql(c.op, v) : null;
   if (allowed.needsValue && !v) return null;
   const e = def.expr;
   const empty = emptySql(def);
@@ -438,6 +475,7 @@ function conditionSql(def: FieldDef, c: Condition): Prisma.Sql | null {
     case "true": return Prisma.sql`l.is_duplicate = TRUE`;
     case "false": return Prisma.sql`l.is_duplicate = FALSE`;
   }
+  return null; // date ops on a non-date field
 }
 
 /**
@@ -506,11 +544,12 @@ export async function queryLeads(ctx: Ctx, query: LeadQuery, defs?: FieldDef[]) 
   const whereSql = buildWhere(ctx, query, byId);
   const sortDef = query.sort ? byId.get(query.sort) : undefined;
   const dir = Prisma.raw(query.dir === "asc" ? "ASC" : "DESC");
-  const orderBy = sortDef
-    ? Prisma.sql`${sortDef.sort} ${dir} NULLS LAST, l.created_at DESC, l.id DESC`
-    : query.sort === "created_at"
+  const orderBy =
+    query.sort === "created_at"
       ? Prisma.sql`l.created_at ${dir}, l.id ${dir}`
-      : Prisma.sql`l.created_at DESC, l.id DESC`; // id breaks ties so pages never repeat or skip rows
+      : sortDef
+        ? Prisma.sql`${sortDef.sort} ${dir} NULLS LAST, l.created_at DESC, l.id DESC`
+        : Prisma.sql`l.created_at DESC, l.id DESC`; // id breaks ties so pages never repeat or skip rows
   const offset = (query.page - 1) * query.pageSize;
 
   const [countRows, idRows] = await Promise.all([
@@ -575,11 +614,11 @@ export async function columnValues(ctx: Ctx, query: LeadQuery, defs: FieldDef[],
   const rows = await prisma.$queryRaw<{ v: string | null; n: number; sampled: number }[]>(Prisma.sql`
     WITH t AS (${sample})
     SELECT v, count(*)::int AS n, (SELECT count(*) FROM t)::int AS sampled FROM (${valueSql}) vals
-    GROUP BY v ORDER BY v IS NULL, lower(v) LIMIT ${VALUES_LIMIT + 1}`);
+    GROUP BY v ORDER BY v IS NULL, ${def.kind === "date" ? Prisma.sql`v DESC` : Prisma.sql`lower(v)`} LIMIT ${VALUES_LIMIT + 1}`);
   const labels = new Map((def.options ?? []).map((o) => [o.value, o.label]));
   const values: ColumnValue[] = rows.slice(0, VALUES_LIMIT).map((r) => ({
     value: r.v ?? BLANK,
-    label: r.v === null ? "(Blanks)" : labels.get(r.v) ?? r.v,
+    label: r.v === null ? "(Blanks)" : def.kind === "date" ? formatDay(r.v) : labels.get(r.v) ?? r.v,
     count: r.n,
   }));
   return { values, truncated: rows.length > VALUES_LIMIT, sampled: (rows[0]?.sampled ?? 0) >= VALUES_SAMPLE };
