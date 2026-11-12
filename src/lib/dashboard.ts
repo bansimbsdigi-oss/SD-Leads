@@ -18,8 +18,12 @@ export type DashboardRow = {
   last7: number;
   last30: number;
   allTime: number;
+  /** Duplicates in the selected range (all time when no range). */
   duplicates: number;
 };
+
+/** `hideDuplicates`: every count leaves duplicates out (the Duplicates column still shows how many). */
+export type DashboardOptions = { hideDuplicates?: boolean };
 
 export type Dashboard = {
   groupBy: "client" | "lp";
@@ -52,34 +56,41 @@ function resolveView(ctx: Ctx, pickedClientId?: string): View {
 const dayParam = (d: Date) => Prisma.sql`${istDay(d)}::date`;
 const istDateOf = Prisma.sql`((l.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date`;
 
-export async function dashboardCounts(ctx: Ctx, range?: RangeId, pickedClientId?: string): Promise<Dashboard> {
+export async function dashboardCounts(ctx: Ctx, range?: RangeId, pickedClientId?: string, opts: DashboardOptions = {}): Promise<Dashboard> {
   const view = resolveView(ctx, pickedClientId);
+  // Leads counted: all, or only the first of each person (duplicates left out).
+  const keep = opts.hideDuplicates ? Prisma.sql`NOT l.is_duplicate` : Prisma.sql`TRUE`;
+  const counted = opts.hideDuplicates ? Prisma.sql`(leads - duplicates)` : Prisma.sql`leads`;
   const today = rangeBounds("today").from;
   const d7 = rangeBounds("7d").from;
   const d30 = rangeBounds("30d").from;
   const bounds = range ? rangeBounds(range) : null;
+  const inRangeLive = bounds
+    ? Prisma.sql`l.created_at >= ${naiveUtc(bounds.from)}${bounds.to ? Prisma.sql` AND l.created_at < ${naiveUtc(bounds.to)}` : Prisma.empty}`
+    : Prisma.sql`TRUE`;
+  const inRangeDay = bounds ? Prisma.sql`day >= ${dayParam(bounds.from)}${bounds.to ? Prisma.sql` AND day < ${dayParam(bounds.to)}` : Prisma.empty}` : Prisma.sql`TRUE`;
   type CountRow = { id: string | null; in_range: number; today: number; last7: number; last30: number; all_time: number; duplicates: number };
 
   const counts = view.live
     ? await prisma.$queryRaw<CountRow[]>(Prisma.sql`
         SELECT l.lp_id AS id,
-          (${bounds ? Prisma.sql`count(*) FILTER (WHERE l.created_at >= ${naiveUtc(bounds.from)}${bounds.to ? Prisma.sql` AND l.created_at < ${naiveUtc(bounds.to)}` : Prisma.empty})` : Prisma.sql`count(*)`})::int AS in_range,
-          count(*) FILTER (WHERE l.created_at >= ${naiveUtc(today)})::int AS today,
-          count(*) FILTER (WHERE l.created_at >= ${naiveUtc(d7)})::int AS last7,
-          count(*) FILTER (WHERE l.created_at >= ${naiveUtc(d30)})::int AS last30,
-          count(*)::int AS all_time,
-          count(*) FILTER (WHERE l.is_duplicate)::int AS duplicates
+          count(*) FILTER (WHERE ${keep} AND ${inRangeLive})::int AS in_range,
+          count(*) FILTER (WHERE ${keep} AND l.created_at >= ${naiveUtc(today)})::int AS today,
+          count(*) FILTER (WHERE ${keep} AND l.created_at >= ${naiveUtc(d7)})::int AS last7,
+          count(*) FILTER (WHERE ${keep} AND l.created_at >= ${naiveUtc(d30)})::int AS last30,
+          count(*) FILTER (WHERE ${keep})::int AS all_time,
+          count(*) FILTER (WHERE l.is_duplicate AND ${inRangeLive})::int AS duplicates
         FROM leads l
         WHERE ${leadScopeSql(ctx)}
         GROUP BY 1`)
     : await prisma.$queryRaw<CountRow[]>(Prisma.sql`
         SELECT ${view.groupBy === "client" ? Prisma.sql`client_id` : Prisma.sql`lp_id`} AS id,
-          COALESCE(${bounds ? Prisma.sql`sum(leads) FILTER (WHERE day >= ${dayParam(bounds.from)}${bounds.to ? Prisma.sql` AND day < ${dayParam(bounds.to)}` : Prisma.empty})` : Prisma.sql`sum(leads)`}, 0)::int AS in_range,
-          COALESCE(sum(leads) FILTER (WHERE day >= ${dayParam(today)}), 0)::int AS today,
-          COALESCE(sum(leads) FILTER (WHERE day >= ${dayParam(d7)}), 0)::int AS last7,
-          COALESCE(sum(leads) FILTER (WHERE day >= ${dayParam(d30)}), 0)::int AS last30,
-          COALESCE(sum(leads), 0)::int AS all_time,
-          COALESCE(sum(duplicates), 0)::int AS duplicates
+          COALESCE(sum(${counted}) FILTER (WHERE ${inRangeDay}), 0)::int AS in_range,
+          COALESCE(sum(${counted}) FILTER (WHERE day >= ${dayParam(today)}), 0)::int AS today,
+          COALESCE(sum(${counted}) FILTER (WHERE day >= ${dayParam(d7)}), 0)::int AS last7,
+          COALESCE(sum(${counted}) FILTER (WHERE day >= ${dayParam(d30)}), 0)::int AS last30,
+          COALESCE(sum(${counted}), 0)::int AS all_time,
+          COALESCE(sum(duplicates) FILTER (WHERE ${inRangeDay}), 0)::int AS duplicates
         FROM lead_daily_counts
         WHERE ${view.scope}
         GROUP BY 1`);
@@ -149,16 +160,18 @@ function trendBuckets(range?: RangeId): { unit: "day" | "month"; from: string; t
   }
 }
 
-export async function dashboardTrend(ctx: Ctx, range?: RangeId, pickedClientId?: string): Promise<Trend> {
+export async function dashboardTrend(ctx: Ctx, range?: RangeId, pickedClientId?: string, opts: DashboardOptions = {}): Promise<Trend> {
   const view = resolveView(ctx, pickedClientId);
+  const keep = opts.hideDuplicates ? Prisma.sql`AND NOT l.is_duplicate` : Prisma.empty;
+  const counted = opts.hideDuplicates ? Prisma.sql`(leads - duplicates)` : Prisma.sql`leads`;
   const { unit, from, title } = trendBuckets(range);
   const fmt = unit === "day" ? "YYYY-MM-DD" : "YYYY-MM";
   const rows = view.live
     ? await prisma.$queryRaw<{ k: string; n: number }[]>(Prisma.sql`
         SELECT to_char(${istDateOf}, ${fmt}) AS k, count(*)::int AS n
-        FROM leads l WHERE ${leadScopeSql(ctx)} AND ${istDateOf} >= ${from}::date GROUP BY 1`)
+        FROM leads l WHERE ${leadScopeSql(ctx)} ${keep} AND ${istDateOf} >= ${from}::date GROUP BY 1`)
     : await prisma.$queryRaw<{ k: string; n: number }[]>(Prisma.sql`
-        SELECT to_char(day, ${fmt}) AS k, COALESCE(sum(leads), 0)::int AS n
+        SELECT to_char(day, ${fmt}) AS k, COALESCE(sum(${counted}), 0)::int AS n
         FROM lead_daily_counts WHERE ${view.scope} AND day >= ${from}::date GROUP BY 1`);
   const byKey = new Map(rows.map((r) => [r.k, r.n]));
 

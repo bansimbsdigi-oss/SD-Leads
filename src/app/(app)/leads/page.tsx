@@ -32,7 +32,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
   const columns = allColumns.filter((c) => ALWAYS_SHOWN.has(c.id) || !hidden.has(c.id));
 
   const selectedClient = clients.find((c) => c.id === query.clientId);
-  const filtered = Boolean(query.q || query.range || query.conditions.length);
+  const filtered = Boolean(query.q || query.range || query.hideDuplicates || query.conditions.length);
   const exportParams = queryToParams(query, { page: undefined, size: undefined });
   // Super admins, and client admins for their own client, can delete. Rows of other clients get no checkbox.
   const canDelete = (clientId: string) => can.deleteLeads(ctx, clientId);

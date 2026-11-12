@@ -128,3 +128,43 @@ describe("dashboard counts", () => {
     expect(all.points.reduce((n, p) => n + p.value, 0)).toBe(3);
   });
 });
+
+describe("duplicates on the dashboard and leads screen", () => {
+  beforeEach(resetDb);
+
+  it("count duplicates for the selected period, and can leave them out of every number", async () => {
+    const { queryLeads } = await import("@/lib/leadQuery");
+    const a = await makeClient("alpha");
+    // 20 days ago: one person twice. Today: another person twice.
+    const old = [await lead(a.lp, 0, "9811100001"), await lead(a.lp, 0, "9811100001")];
+    await prisma.lead.updateMany({ where: { id: { in: old } }, data: { createdAt: new Date(Date.now() - 20 * 86_400_000) } });
+    await lead(a.lp, 0, "9811100002");
+    await lead(a.lp, 0, "9811100002");
+    await rebuildDailyCounts();
+    expect(await prisma.lead.count({ where: { isDuplicate: true } })).toBe(2);
+
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const row = async (range?: "7d", hide?: boolean) => {
+      const r = (await dashboardCounts(admin, range, undefined, { hideDuplicates: hide })).rows[0];
+      return [r.inRange, r.today, r.last30, r.allTime, r.duplicates];
+    };
+    expect(await row()).toEqual([4, 2, 4, 4, 2]);
+    expect(await row("7d")).toEqual([2, 2, 4, 4, 1]); // duplicates follow the period
+    expect(await row("7d", true)).toEqual([1, 1, 2, 2, 1]); // counts leave them out
+    expect(await row(undefined, true)).toEqual([2, 1, 2, 2, 2]);
+
+    // Counted live for a client member: same answers.
+    const member = await makeUser("CLIENT_MEMBER", a.client.id, { lpIds: [a.lp.id] });
+    const live = (await dashboardCounts(member, "7d", undefined, { hideDuplicates: true })).totals;
+    expect([live.inRange, live.allTime, live.duplicates]).toEqual([1, 2, 1]);
+
+    const trend = await dashboardTrend(admin, "30d", undefined, { hideDuplicates: true });
+    expect(trend.points.reduce((n, p) => n + p.value, 0)).toBe(2);
+
+    // Leads screen: "Hide duplicates".
+    const base = { conditions: [], dir: "desc" as const, page: 1, pageSize: 100 };
+    expect((await queryLeads(admin, { ...base })).total).toBe(4);
+    const shown = await queryLeads(admin, { ...base, hideDuplicates: true });
+    expect([shown.total, shown.rows.every((l) => !l.isDuplicate)]).toEqual([2, true]);
+  });
+});

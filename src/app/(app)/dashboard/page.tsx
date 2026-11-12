@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BarChart3, ExternalLink } from "lucide-react";
+import { ArrowLeft, ArrowRight, BarChart3, CopyX, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { DashboardClientPicker } from "@/components/DashboardClientPicker";
 import { LeadsBarChart } from "@/components/LeadsBarChart";
@@ -22,29 +22,33 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
   const rangeLabel = range ? RANGES.find((r) => r.id === range)!.label : "All time";
   const staff = isSabhiStaff(ctx);
   const picked = staff ? first(sp.client) : undefined;
+  const hideDupes = first(sp.dupes) === "hide";
 
   const [clients, { groupBy, clientId, rows, totals }, trend] = await Promise.all([
     staff ? listClientOptions(ctx) : Promise.resolve([]),
-    orNotFound(dashboardCounts(ctx, range, picked)),
-    orNotFound(dashboardTrend(ctx, range, picked)),
+    orNotFound(dashboardCounts(ctx, range, picked, { hideDuplicates: hideDupes })),
+    orNotFound(dashboardTrend(ctx, range, picked, { hideDuplicates: hideDupes })),
   ]);
   const client = clients.find((c) => c.id === picked);
   const oneClient = groupBy === "lp";
   const noun = oneClient ? "landing page" : "client";
 
-  /** Dashboard URL keeping the other parameter. */
-  const dashHref = (o: { client?: string | null; range?: RangeId | null }) => {
+  /** Dashboard URL keeping the other parameters. */
+  const dashHref = (o: { client?: string | null; range?: RangeId | null; dupes?: boolean }) => {
     const p = new URLSearchParams();
     const c = o.client === undefined ? picked : o.client;
     const r = o.range === undefined ? range : o.range;
+    const d = o.dupes === undefined ? hideDupes : o.dupes;
     if (c) p.set("client", c);
     if (r) p.set("range", r);
+    if (d) p.set("dupes", "hide");
     return p.size ? `/dashboard?${p}` : "/dashboard";
   };
   const leadsHref = (forClient?: string | null, lpId?: string) => {
     const p = new URLSearchParams();
     if (staff && forClient) p.set("client", forClient);
     if (range) p.set("range", range);
+    if (hideDupes) p.set("dupes", "hide");
     // Same "filter by values" the Landing page column uses.
     if (lpId) p.set("f", JSON.stringify([{ field: "lp", op: "in", values: [lpId] }]));
     return p.size ? `/leads?${p}` : "/leads";
@@ -55,7 +59,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
   const withLeads = rows.filter((r) => r.inRange > 0).length;
   const top = rows[0]?.inRange ? rows[0] : null;
   const tiles = [
-    { label: `Leads · ${rangeLabel}`, value: fmt(totals.inRange), hint: range ? `${fmt(totals.allTime)} all time` : `Across ${rows.length} ${noun}${rows.length === 1 ? "" : "s"}` },
+    {
+      label: `Leads · ${rangeLabel}`,
+      value: fmt(totals.inRange),
+      hint: hideDupes
+        ? `${fmt(totals.duplicates)} duplicate${totals.duplicates === 1 ? "" : "s"} left out`
+        : range ? `${fmt(totals.allTime)} all time` : `Across ${rows.length} ${noun}${rows.length === 1 ? "" : "s"}`,
+    },
     { label: "Today", value: fmt(totals.today), hint: "Since midnight IST" },
     { label: "Last 7 days", value: fmt(totals.last7), hint: `${fmt(totals.last30)} in 30 days` },
     { label: oneClient ? "Pages with leads" : "Clients with leads", value: `${withLeads} / ${rows.length}`, hint: top ? `Most: ${top.name}` : `None · ${rangeLabel.toLowerCase()}` },
@@ -103,6 +113,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
             );
           })}
         </nav>
+        <Link
+          href={dashHref({ dupes: !hideDupes })}
+          aria-pressed={hideDupes}
+          title="Duplicates are repeat leads from the same phone or email within 30 days; the first one stays."
+          className={buttonClass(hideDupes ? "primary" : "secondary", "sm")}
+        >
+          <CopyX aria-hidden /> {hideDupes ? "Duplicates hidden" : "Hide duplicates"}
+        </Link>
       </div>
 
       <dl className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -152,7 +170,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
                     <th className="text-right">7 days</th>
                     <th className="text-right">30 days</th>
                     {range && <th className="text-right">All time</th>}
-                    <th className="text-right">Duplicates</th>
+                    <th className="text-right" title={hideDupes ? "Left out of the other numbers" : undefined}>
+                      Duplicates{range ? ` · ${rangeLabel}` : ""}
+                    </th>
                     {!oneClient && <th className="w-8"><span className="sr-only">Leads</span></th>}
                   </tr>
                 </thead>
