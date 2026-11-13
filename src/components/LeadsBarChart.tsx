@@ -57,7 +57,7 @@ export function LeadsBarChart({ bars, total, valueLabel }: { bars: Bar[]; total:
                 className="relative z-10 flex h-8 w-full items-center"
               >
                 <span
-                  className={`h-[18px] rounded-r-[4px] transition-colors duration-150 ${isActive ? "bg-brand-700" : "bg-brand-500"}`}
+                  className={`h-[18px] rounded-r-[4px] transition-colors duration-150 ${isActive ? "bg-highlight" : "bg-brand-500"}`}
                   style={{ width: b.value ? `max(${pct}%, 3px)` : 0 }}
                 />
                 <span className="ml-2 text-xs font-medium tabular-nums text-ink">{fmt(b.value)}</span>

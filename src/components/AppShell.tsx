@@ -4,6 +4,7 @@ import { Building2, Inbox, LayoutDashboard, LogOut, Menu, ScrollText, Users, X }
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar, cx } from "@/components/ui";
 
 const ICONS = { dashboard: LayoutDashboard, leads: Inbox, clients: Building2, team: Users, audit: ScrollText } as const;
@@ -30,16 +31,16 @@ export function AppShell({
   const sidebar = (
     <div className="flex h-full flex-col border-r border-nav-line bg-nav text-nav-ink">
       <div className="relative flex h-16 items-center gap-3 px-5">
-        <span aria-hidden className="flex size-8 items-center justify-center rounded-lg bg-brand-700 text-sm font-bold text-brand-950">S</span>
+        <span aria-hidden className="flex size-8 items-center justify-center rounded-lg bg-highlight text-sm font-bold text-on-highlight">S</span>
         <span className="min-w-0">
-          <span className="block text-[15px] font-semibold leading-tight tracking-tight text-ink">Sabhi Leads</span>
-          <span className="block text-[11px] leading-tight text-ink-muted">Lead platform</span>
+          <span className="block text-[15px] font-semibold leading-tight tracking-tight text-nav-strong">Sabhi Leads</span>
+          <span className="block text-[11px] leading-tight text-nav-muted">Lead platform</span>
         </span>
       </div>
       <nav aria-label="Main" className="relative flex-1 space-y-5 overflow-y-auto px-3 py-3">
         {sections.map((s) => (
           <div key={s.name}>
-            {sections.length > 1 && <p className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-wider text-stone-400">{s.name}</p>}
+            {sections.length > 1 && <p className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-wider text-nav-muted">{s.name}</p>}
             <div className="space-y-0.5">
               {s.items.map((item) => {
                 const Icon = ICONS[item.icon];
@@ -51,10 +52,11 @@ export function AppShell({
                     aria-current={active ? "page" : undefined}
                     className={cx(
                       "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150",
-                      active ? "bg-surface text-ink shadow-sm ring-1 ring-line" : "hover:bg-stone-100 hover:text-ink",
+                      active ? "bg-nav-active text-nav-strong shadow-sm ring-1 ring-nav-line" : "hover:bg-nav-hover hover:text-nav-strong",
                     )}
                   >
-                    <Icon aria-hidden className={cx("size-[18px]", active ? "text-brand-700" : "text-stone-400")} />
+                    {active && <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-nav-accent" />}
+                    <Icon aria-hidden className={cx("size-[18px]", active ? "text-nav-accent" : "text-nav-muted")} />
                     {item.label}
                   </Link>
                 );
@@ -64,14 +66,15 @@ export function AppShell({
         ))}
       </nav>
       <div className="relative border-t border-nav-line p-3">
-        <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+        <div className="flex items-center gap-2 rounded-lg px-2 py-2">
           <Avatar name={user.name} size="sm" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-ink">{user.name}</p>
-            <p className="truncate text-xs text-ink-muted">{user.role}</p>
+            <p className="truncate text-sm font-medium text-nav-strong">{user.name}</p>
+            <p className="truncate text-xs text-nav-muted">{user.role}</p>
           </div>
+          <ThemeToggle className="text-nav-muted hover:bg-nav-hover hover:text-nav-strong" />
           <form action={signOut}>
-            <button aria-label="Sign out" title="Sign out" className="rounded-md p-2 text-ink-muted transition-colors hover:bg-stone-100 hover:text-ink">
+            <button aria-label="Sign out" title="Sign out" className="rounded-md p-2 text-nav-muted transition-colors hover:bg-nav-hover hover:text-nav-strong">
               <LogOut aria-hidden className="size-4" />
             </button>
           </form>
@@ -90,14 +93,15 @@ export function AppShell({
         <button aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)} className="-ml-2 rounded-md p-2 text-ink-muted hover:bg-slate-100">
           <Menu aria-hidden className="size-5" />
         </button>
-        <span aria-hidden className="flex size-7 items-center justify-center rounded-lg bg-brand-700 text-xs font-bold text-brand-950">S</span>
-        <span className="font-semibold text-ink">Sabhi Leads</span>
+        <span aria-hidden className="flex size-7 items-center justify-center rounded-lg bg-highlight text-xs font-bold text-on-highlight">S</span>
+        <span className="flex-1 font-semibold text-ink">Sabhi Leads</span>
+        <ThemeToggle className="-mr-2 text-ink-muted hover:bg-slate-100 hover:text-ink" />
       </header>
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setOpen(false)} />
           <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] shadow-xl">
-            <button aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 z-10 rounded-md p-2 text-ink-muted hover:bg-stone-100">
+            <button aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 z-10 rounded-md p-2 text-nav-ink hover:bg-nav-hover hover:text-nav-strong">
               <X aria-hidden className="size-5" />
             </button>
             {sidebar}

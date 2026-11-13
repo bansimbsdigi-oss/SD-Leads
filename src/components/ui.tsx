@@ -10,10 +10,10 @@ export function buttonClass(variant: ButtonProps["variant"] = "primary", size: B
   return cx(
     "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition-all duration-150 active:translate-y-px disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
     size === "sm" ? "h-8 px-3 text-sm" : "h-9 px-4 text-sm",
-    variant === "primary" && "bg-brand-700 text-brand-950 shadow-sm hover:bg-brand-800",
+    variant === "primary" && "bg-brand-700 text-on-brand shadow-sm hover:bg-brand-800",
     variant === "secondary" && "border border-line bg-surface text-ink shadow-sm hover:border-slate-300 hover:bg-slate-50",
     variant === "ghost" && "text-ink-muted hover:bg-slate-100 hover:text-ink",
-    variant === "danger" && "bg-red-600 text-white shadow-sm hover:bg-red-700",
+    variant === "danger" && "bg-red-600 text-white shadow-sm hover:bg-red-500",
   );
 }
 
