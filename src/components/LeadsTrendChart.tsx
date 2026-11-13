@@ -49,7 +49,7 @@ export function LeadsTrendChart({ points }: { points: TrendPoint[] }) {
                   className="flex h-full w-full cursor-default items-end justify-center"
                 >
                   <span
-                    className={`w-full max-w-6 rounded-t-[4px] transition-colors duration-150 bg-gradient-to-t ${isActive ? "from-brand-700 to-violet-500" : "from-brand-600 to-violet-400"}`}
+                    className={`w-full max-w-6 rounded-t-[4px] transition-colors duration-150 ${isActive ? "bg-brand-700" : "bg-brand-500"}`}
                     style={{ height: p.value ? `max(${h}%, 2px)` : 0 }}
                   />
                 </button>

@@ -69,7 +69,7 @@ export function LoginForm() {
       <button
         type="submit"
         disabled={pending}
-        className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-brand-600 to-violet-600 text-[15px] font-semibold text-white shadow-md shadow-brand-600/25 transition-all duration-150 hover:from-brand-700 hover:to-violet-700 disabled:opacity-70"
+        className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-700 text-[15px] font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-brand-800 disabled:opacity-70"
       >
         {pending && <Loader2 aria-hidden className="size-4 animate-spin" />}
         {pending ? "Signing in…" : "Sign in"}

@@ -81,23 +81,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
   return (
     <>
       {!client && (
-        <section className="relative mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600 via-violet-600 to-fuchsia-500 px-6 py-6 text-white shadow-lift sm:px-8 sm:py-7">
-          <span aria-hidden className="pointer-events-none absolute -right-16 -top-24 size-72 rounded-full bg-white/15 blur-2xl" />
-          <span aria-hidden className="pointer-events-none absolute -bottom-28 right-1/3 size-72 rounded-full bg-fuchsia-300/20 blur-3xl" />
-          <div className="relative flex flex-wrap items-end justify-between gap-5">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white/75">{todayLabel}</p>
-              <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{greeting}, {ctx.name.split(" ")[0]}</h1>
-              <p className="mt-2 max-w-xl text-sm text-white/85">
-                <strong className="font-semibold text-white">{fmt(totals.today)}</strong> new lead{totals.today === 1 ? "" : "s"} today ·{" "}
-                <strong className="font-semibold text-white">{fmt(totals.last7)}</strong> this week ·{" "}
-                <strong className="font-semibold text-white">{fmt(totals.allTime)}</strong> {hideDupes ? "unique " : ""}all time
-              </p>
-            </div>
-            <Link href={leadsHref(clientId)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-brand-700 shadow-lg shadow-brand-900/20 transition-transform duration-150 hover:-translate-y-0.5">
-              Open leads <ArrowRight aria-hidden className="size-4" />
-            </Link>
+        <section className="mb-6 flex flex-wrap items-end justify-between gap-5 rounded-xl border border-line bg-surface px-6 py-5 shadow-card">
+          <div className="min-w-0">
+            <p className="text-[13px] text-ink-muted">{todayLabel}</p>
+            <h1 className="mt-0.5 text-2xl font-semibold tracking-tight text-ink">{greeting}, {ctx.name.split(" ")[0]}</h1>
+            <p className="mt-1.5 text-sm text-ink-muted">
+              <span className="font-semibold text-ink">{fmt(totals.today)}</span> new lead{totals.today === 1 ? "" : "s"} today
+              <span aria-hidden className="mx-2 text-stone-300">/</span>
+              <span className="font-semibold text-ink">{fmt(totals.last7)}</span> this week
+              <span aria-hidden className="mx-2 text-stone-300">/</span>
+              <span className="font-semibold text-ink">{fmt(totals.allTime)}</span> {hideDupes ? "unique " : ""}all time
+            </p>
           </div>
+          <Link href={leadsHref(clientId)} className={buttonClass("primary", "sm")}>
+            Open leads <ArrowRight aria-hidden />
+          </Link>
         </section>
       )}
       {client && <PageHeader

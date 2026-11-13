@@ -13,7 +13,7 @@ export default async function LoginPage() {
   if (await getCtx()) redirect("/");
   return (
     <main className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(480px,42%)]">
-      <section className="relative hidden overflow-hidden bg-gradient-to-br from-brand-700 via-brand-900 to-brand-950 p-12 text-white lg:flex lg:flex-col lg:justify-between">
+      <section className="relative hidden overflow-hidden bg-brand-900 p-12 text-white lg:flex lg:flex-col lg:justify-between">
         <div className="flex items-center gap-2.5">
           <span aria-hidden className="flex size-9 items-center justify-center rounded-lg bg-white/10 text-base font-bold">S</span>
           <span className="text-lg font-semibold">Sabhi Leads</span>
@@ -30,14 +30,13 @@ export default async function LoginPage() {
           </ul>
         </div>
         <p className="text-xs text-brand-200/70">Sabhi Digital</p>
-        <div aria-hidden className="absolute -right-24 -top-24 size-96 rounded-full bg-violet-500/30 blur-3xl" />
-        <div aria-hidden className="absolute -bottom-32 -left-20 size-96 rounded-full bg-fuchsia-500/20 blur-3xl" />
+        <div aria-hidden className="absolute -right-24 -top-24 size-96 rounded-full bg-brand-700/40 blur-3xl" />
       </section>
 
       <section className="flex items-center justify-center bg-canvas px-4 py-12 sm:px-8">
         <div className="w-full max-w-[400px]">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span aria-hidden className="flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 via-brand-600 to-violet-600 text-base font-extrabold text-white">S</span>
+            <span aria-hidden className="flex size-9 items-center justify-center rounded-lg bg-brand-700 text-base font-bold text-white">S</span>
             <span className="text-lg font-semibold">Sabhi Leads</span>
           </div>
           <div className="rounded-2xl border border-line bg-surface p-6 shadow-[0_1px_3px_rgba(15,23,42,0.06),0_8px_24px_rgba(15,23,42,0.06)] sm:p-8">
