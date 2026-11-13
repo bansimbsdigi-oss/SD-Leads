@@ -1,33 +1,36 @@
 @import "tailwindcss";
 
-/* Design tokens. Swiss/minimal, data-dense: navy-blue primary, amber accent, slate neutrals. */
+/* Design tokens. "Indigo aurora": indigo-violet primary with gradient accents, slate neutrals. */
 @theme {
-  --font-sans: var(--font-fira-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: var(--font-ui-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-fira-code), ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-brand-50: #eff4ff;
-  --color-brand-100: #dbe6fe;
-  --color-brand-200: #bfd3fe;
-  --color-brand-500: #3b6ff0;
-  --color-brand-600: #1e4fd8;
-  --color-brand-700: #1e40af;
-  --color-brand-800: #1e3a8a;
-  --color-brand-900: #172554;
-  --color-accent-500: #d97706;
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+  --color-brand-950: #1e1b4b;
+  --color-accent-500: #8b5cf6;
 
-  --color-canvas: #f4f6fa;
+  --color-canvas: #f5f6fb;
   --color-surface: #ffffff;
-  --color-line: #e3e8f0;
+  --color-line: #e5e7f0;
   --color-ink: #0f172a;
-  --color-ink-muted: #526077;
+  --color-ink-muted: #586178;
 
-  /* Sidebar: deep navy panel */
-  --color-nav: #0c1631;
-  --color-nav-line: #1c2a4d;
-  --color-nav-ink: #c3cde3;
+  /* Sidebar: deep indigo panel */
+  --color-nav: #17153b;
+  --color-nav-line: #2a2760;
+  --color-nav-ink: #c9cbf0;
 
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.04);
-  --shadow-lift: 0 4px 12px -2px rgb(15 23 42 / 0.08), 0 2px 4px -2px rgb(15 23 42 / 0.05);
+  --shadow-card: 0 1px 2px rgb(30 27 75 / 0.04), 0 2px 8px -2px rgb(30 27 75 / 0.06);
+  --shadow-lift: 0 10px 24px -8px rgb(30 27 75 / 0.18), 0 4px 8px -4px rgb(30 27 75 / 0.08);
 }
 
 html {
@@ -36,6 +39,11 @@ html {
 
 body {
   @apply bg-canvas font-sans text-ink antialiased;
+  /* Soft indigo / violet glow in the corners, behind everything. */
+  background-image:
+    radial-gradient(1100px 520px at 105% -8%, rgb(99 102 241 / 0.09), transparent 60%),
+    radial-gradient(900px 480px at -8% -6%, rgb(139 92 246 / 0.07), transparent 55%);
+  background-attachment: fixed;
   font-feature-settings: "tnum" 1; /* aligned numbers in tables and counts */
 }
 

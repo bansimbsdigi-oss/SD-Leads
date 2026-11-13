@@ -28,15 +28,16 @@ export function AppShell({
   const sections = (["Workspace", "Admin"] as const).map((name) => ({ name, items: nav.filter((n) => n.section === name) })).filter((s) => s.items.length);
 
   const sidebar = (
-    <div className="flex h-full flex-col bg-nav text-nav-ink">
-      <div className="flex h-16 items-center gap-3 px-5">
-        <span aria-hidden className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white shadow-lg shadow-brand-900/40 ring-1 ring-white/10">S</span>
+    <div className="relative flex h-full flex-col overflow-hidden bg-gradient-to-b from-brand-950 via-nav to-[#0d0c26] text-nav-ink">
+      <span aria-hidden className="pointer-events-none absolute -left-16 -top-20 size-64 rounded-full bg-violet-500/20 blur-3xl" />
+      <div className="relative flex h-16 items-center gap-3 px-5">
+        <span aria-hidden className="relative flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 via-brand-600 to-violet-600 text-sm font-extrabold text-white shadow-lg shadow-violet-900/50 ring-1 ring-white/15">S</span>
         <span className="min-w-0">
           <span className="block text-[15px] font-semibold leading-tight tracking-tight text-white">Sabhi Leads</span>
           <span className="block text-[11px] leading-tight text-nav-ink/70">Lead platform</span>
         </span>
       </div>
-      <nav aria-label="Main" className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
+      <nav aria-label="Main" className="relative flex-1 space-y-5 overflow-y-auto px-3 py-3">
         {sections.map((s) => (
           <div key={s.name}>
             {sections.length > 1 && <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-nav-ink/50">{s.name}</p>}
@@ -51,10 +52,10 @@ export function AppShell({
                     aria-current={active ? "page" : undefined}
                     className={cx(
                       "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150",
-                      active ? "bg-white/10 text-white" : "hover:bg-white/5 hover:text-white",
+                      active ? "bg-gradient-to-r from-brand-500/35 to-violet-500/10 text-white shadow-inner shadow-white/5 ring-1 ring-white/10" : "hover:bg-white/5 hover:text-white",
                     )}
                   >
-                    {active && <span aria-hidden className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-brand-500" />}
+                    {active && <span aria-hidden className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-gradient-to-b from-brand-300 to-violet-400" />}
                     <Icon aria-hidden className={cx("size-[18px]", active ? "text-brand-200" : "text-nav-ink/70")} />
                     {item.label}
                   </Link>
@@ -64,7 +65,7 @@ export function AppShell({
           </div>
         ))}
       </nav>
-      <div className="border-t border-nav-line p-3">
+      <div className="relative border-t border-nav-line p-3">
         <div className="flex items-center gap-3 rounded-lg bg-white/5 px-2.5 py-2">
           <Avatar name={user.name} size="sm" />
           <div className="min-w-0 flex-1">
@@ -91,7 +92,7 @@ export function AppShell({
         <button aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)} className="-ml-2 rounded-md p-2 text-ink-muted hover:bg-slate-100">
           <Menu aria-hidden className="size-5" />
         </button>
-        <span aria-hidden className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-bold text-white">S</span>
+        <span aria-hidden className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 via-brand-600 to-violet-600 text-xs font-extrabold text-white">S</span>
         <span className="font-semibold text-ink">Sabhi Leads</span>
       </header>
       {open && (

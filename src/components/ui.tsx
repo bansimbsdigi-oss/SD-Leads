@@ -10,7 +10,7 @@ export function buttonClass(variant: ButtonProps["variant"] = "primary", size: B
   return cx(
     "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition-all duration-150 active:translate-y-px disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
     size === "sm" ? "h-8 px-3 text-sm" : "h-9 px-4 text-sm",
-    variant === "primary" && "bg-brand-700 text-white shadow-sm shadow-brand-900/20 hover:bg-brand-800",
+    variant === "primary" && "bg-gradient-to-r from-brand-600 to-violet-600 text-white shadow-md shadow-brand-600/25 hover:from-brand-700 hover:to-violet-700 hover:shadow-lg hover:shadow-brand-600/30",
     variant === "secondary" && "border border-line bg-surface text-ink shadow-sm hover:border-slate-300 hover:bg-slate-50",
     variant === "ghost" && "text-ink-muted hover:bg-slate-100 hover:text-ink",
     variant === "danger" && "bg-red-600 text-white shadow-sm hover:bg-red-700",
@@ -68,11 +68,11 @@ export function Card({
   children: ReactNode;
 }) {
   return (
-    <section className={cx("overflow-hidden rounded-xl border border-line bg-surface shadow-card", className)}>
+    <section className={cx("overflow-hidden rounded-2xl border border-line/80 bg-surface shadow-card", className)}>
       {(title || actions) && (
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-ink">{title}</h2>
+            <h2 className="text-[15px] font-semibold tracking-tight text-ink">{title}</h2>
             {description && <p className="mt-0.5 text-xs text-ink-muted">{description}</p>}
           </div>
           {actions}
@@ -163,7 +163,7 @@ export function PageHeader({
         <div className="flex min-w-0 items-center gap-3">
           {icon}
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold tracking-tight text-ink sm:text-2xl">{title}</h1>
+            <h1 className="truncate text-xl font-bold tracking-tight text-ink sm:text-[26px]">{title}</h1>
             {subtitle && <div className="mt-1 text-sm text-ink-muted">{subtitle}</div>}
           </div>
         </div>
@@ -175,10 +175,10 @@ export function PageHeader({
 
 export const tableClass = cx(
   "w-full border-separate border-spacing-0 text-left text-sm",
-  "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:border-b [&_thead_th]:border-line [&_thead_th]:bg-slate-50/95 [&_thead_th]:backdrop-blur",
+  "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:border-b [&_thead_th]:border-line [&_thead_th]:bg-brand-50/60 [&_thead_th]:backdrop-blur",
   "[&_th]:whitespace-nowrap [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-ink-muted",
   "[&_td]:border-b [&_td]:border-slate-100 [&_td]:px-4 [&_td]:py-3 [&_td]:align-middle",
-  "[&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-slate-50/70",
+  "[&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-brand-50/40",
 );
 
 export function Empty({ icon, title, children, action }: { icon?: ReactNode; title?: ReactNode; children?: ReactNode; action?: ReactNode }) {
@@ -192,25 +192,30 @@ export function Empty({ icon, title, children, action }: { icon?: ReactNode; tit
   );
 }
 
-const STAT_TONES: Record<Tone, string> = {
-  slate: "bg-slate-100 text-slate-600",
-  green: "bg-emerald-50 text-emerald-600",
-  amber: "bg-amber-50 text-amber-600",
-  red: "bg-red-50 text-red-600",
-  blue: "bg-brand-50 text-brand-600",
-  violet: "bg-violet-50 text-violet-600",
+const STAT_TONES: Record<Tone, { chip: string; glow: string }> = {
+  slate: { chip: "from-slate-500 to-slate-700 shadow-slate-500/30", glow: "bg-slate-400/10" },
+  green: { chip: "from-emerald-400 to-teal-600 shadow-emerald-500/30", glow: "bg-emerald-400/10" },
+  amber: { chip: "from-amber-400 to-orange-500 shadow-orange-500/30", glow: "bg-amber-400/10" },
+  red: { chip: "from-rose-400 to-red-600 shadow-red-500/30", glow: "bg-rose-400/10" },
+  blue: { chip: "from-brand-500 to-violet-600 shadow-brand-500/30", glow: "bg-brand-400/10" },
+  violet: { chip: "from-violet-500 to-fuchsia-600 shadow-violet-500/30", glow: "bg-violet-400/10" },
 };
 
 /** KPI tile: icon chip, label, big number and a one-line hint. */
 export function StatTile({ label, value, hint, icon, tone = "blue" }: { label: ReactNode; value: ReactNode; hint?: ReactNode; icon?: ReactNode; tone?: Tone }) {
   return (
-    <div className="rounded-xl border border-line bg-surface px-5 py-4 shadow-card">
-      <div className="flex items-start justify-between gap-3">
-        <dt className="text-xs font-medium text-ink-muted">{label}</dt>
-        {icon && <span aria-hidden className={cx("flex size-8 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4", STAT_TONES[tone])}>{icon}</span>}
+    <div className="relative overflow-hidden rounded-2xl border border-line/80 bg-surface px-5 py-4 shadow-card transition-shadow duration-200 hover:shadow-lift">
+      <span aria-hidden className={cx("pointer-events-none absolute -right-8 -top-8 size-28 rounded-full blur-2xl", STAT_TONES[tone].glow)} />
+      <div className="relative flex items-start justify-between gap-3">
+        <dt className="pt-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">{label}</dt>
+        {icon && (
+          <span aria-hidden className={cx("flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg [&_svg]:size-[18px]", STAT_TONES[tone].chip)}>
+            {icon}
+          </span>
+        )}
       </div>
-      <dd className="mt-1 text-3xl font-semibold tracking-tight tabular-nums text-ink">{value}</dd>
-      {hint && <dd className="mt-1 truncate text-xs text-ink-muted">{hint}</dd>}
+      <dd className="relative mt-1 text-3xl font-bold tracking-tight tabular-nums text-ink">{value}</dd>
+      {hint && <dd className="relative mt-1 truncate text-xs text-ink-muted">{hint}</dd>}
     </div>
   );
 }
