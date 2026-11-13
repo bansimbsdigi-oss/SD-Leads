@@ -13,15 +13,15 @@ const ROLE_LABEL = {
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireCtx();
   const nav: NavItem[] = [
-    { href: "/dashboard", label: "Dashboard", icon: "dashboard", match: ["/dashboard"] },
-    { href: "/leads", label: "Leads", icon: "leads", match: ["/leads"] },
+    { href: "/dashboard", label: "Dashboard", icon: "dashboard", match: ["/dashboard"], section: "Workspace" },
+    { href: "/leads", label: "Leads", icon: "leads", match: ["/leads"], section: "Workspace" },
     isSabhiStaff(ctx) || !ctx.clientId
-      ? { href: "/clients", label: "Clients", icon: "clients", match: ["/clients", "/lps"] }
-      : { href: `/clients/${ctx.clientId}`, label: "Landing pages", icon: "clients", match: ["/clients", "/lps"] },
+      ? { href: "/clients", label: "Clients", icon: "clients", match: ["/clients", "/lps"], section: "Workspace" }
+      : { href: `/clients/${ctx.clientId}`, label: "Landing pages", icon: "clients", match: ["/clients", "/lps"], section: "Workspace" },
     ...(ctx.role === "SUPER_ADMIN"
       ? ([
-          { href: "/users", label: "Sabhi team", icon: "team", match: ["/users"] },
-          { href: "/audit", label: "Audit log", icon: "audit", match: ["/audit"] },
+          { href: "/users", label: "Sabhi team", icon: "team", match: ["/users"], section: "Admin" },
+          { href: "/audit", label: "Audit log", icon: "audit", match: ["/audit"], section: "Admin" },
         ] satisfies NavItem[])
       : []),
   ];

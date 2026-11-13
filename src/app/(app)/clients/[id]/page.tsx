@@ -1,10 +1,10 @@
-import { ArrowRight, FileText, RefreshCw, UserPlus, Users, Webhook } from "lucide-react";
+import { ArrowRight, CircleCheck, FileText, Inbox, RefreshCw, UserPlus, Users, Webhook } from "lucide-react";
 import Link from "next/link";
 import { rotateWebhookAction } from "@/app/actions";
 import { CopyBox } from "@/components/CopyBox";
 import { DeleteClientDialog } from "@/components/DeleteClientDialog";
 import { EditLpDialog } from "@/components/EditLpDialog";
-import { Avatar, Badge, Button, buttonClass, Card, Empty, PageHeader, tableClass } from "@/components/ui";
+import { Avatar, Badge, Button, buttonClass, Card, Empty, PageHeader, StatTile, tableClass, type Tone } from "@/components/ui";
 import { EditUserDialog } from "@/components/EditUserDialog";
 import { UserForm } from "@/components/UserForm";
 import { WebhooksCard } from "@/components/WebhooksCard";
@@ -30,11 +30,11 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
 
   const webhookUrl = `${(process.env.INGEST_URL || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/api/hook/${client.webhookToken}`;
   const leadCount = lps.reduce((n, lp) => n + lp._count.leads, 0);
-  const stats = [
-    { label: "Landing pages", value: lps.length },
-    { label: "Leads", value: leadCount },
-    { label: "Active pages", value: lps.filter((lp) => lp.status === "active").length },
-    ...(canManageUsers ? [{ label: "Users", value: users.length }] : []),
+  const stats: { label: string; value: number; icon: React.ReactNode; tone: Tone }[] = [
+    { label: "Landing pages", value: lps.length, icon: <FileText />, tone: "blue" },
+    { label: "Leads", value: leadCount, icon: <Inbox />, tone: "violet" },
+    { label: "Active pages", value: lps.filter((lp) => lp.status === "active").length, icon: <CircleCheck />, tone: "green" },
+    ...(canManageUsers ? [{ label: "Users", value: users.length, icon: <Users />, tone: "amber" as const }] : []),
   ];
 
   return (
@@ -53,10 +53,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
 
       <dl className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-line bg-surface px-4 py-3">
-            <dt className="text-xs font-medium text-ink-muted">{s.label}</dt>
-            <dd className="mt-1 text-2xl font-semibold tracking-tight">{s.value.toLocaleString("en-IN")}</dd>
-          </div>
+          <StatTile key={s.label} label={s.label} value={s.value.toLocaleString("en-IN")} icon={s.icon} tone={s.tone} />
         ))}
       </dl>
 

@@ -8,9 +8,9 @@ type ButtonProps = ComponentProps<"button"> & { variant?: "primary" | "secondary
 
 export function buttonClass(variant: ButtonProps["variant"] = "primary", size: ButtonProps["size"] = "md") {
   return cx(
-    "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+    "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition-all duration-150 active:translate-y-px disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
     size === "sm" ? "h-8 px-3 text-sm" : "h-9 px-4 text-sm",
-    variant === "primary" && "bg-brand-700 text-white shadow-sm hover:bg-brand-800",
+    variant === "primary" && "bg-brand-700 text-white shadow-sm shadow-brand-900/20 hover:bg-brand-800",
     variant === "secondary" && "border border-line bg-surface text-ink shadow-sm hover:border-slate-300 hover:bg-slate-50",
     variant === "ghost" && "text-ink-muted hover:bg-slate-100 hover:text-ink",
     variant === "danger" && "bg-red-600 text-white shadow-sm hover:bg-red-700",
@@ -22,7 +22,7 @@ export function Button({ variant, size, className, ...props }: ButtonProps) {
 }
 
 const field =
-  "w-full rounded-md border border-line bg-surface text-sm text-ink shadow-sm transition-colors duration-150 placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-600 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:bg-slate-50";
+  "w-full rounded-lg border border-line bg-surface text-sm text-ink shadow-sm transition-colors duration-150 placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-600 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:bg-slate-50";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cx(field, "h-9 px-3", className)} {...props} />;
@@ -38,6 +38,17 @@ export function Label({ className, ...props }: ComponentProps<"label">) {
 
 export function Hint({ children }: { children: ReactNode }) {
   return <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">{children}</p>;
+}
+
+/** Label + control + optional hint, spaced consistently. */
+export function Field({ label, htmlFor, hint, children }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <div>
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+      {hint && <Hint>{hint}</Hint>}
+    </div>
+  );
 }
 
 /** White panel. `flush` removes body padding (tables run edge to edge). */
@@ -57,9 +68,9 @@ export function Card({
   children: ReactNode;
 }) {
   return (
-    <section className={cx("overflow-hidden rounded-xl border border-line bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.04)]", className)}>
+    <section className={cx("overflow-hidden rounded-xl border border-line bg-surface shadow-card", className)}>
       {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-ink">{title}</h2>
             {description && <p className="mt-0.5 text-xs text-ink-muted">{description}</p>}
@@ -165,7 +176,7 @@ export function PageHeader({
 export const tableClass = cx(
   "w-full border-separate border-spacing-0 text-left text-sm",
   "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:border-b [&_thead_th]:border-line [&_thead_th]:bg-slate-50/95 [&_thead_th]:backdrop-blur",
-  "[&_th]:whitespace-nowrap [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-xs [&_th]:font-semibold [&_th]:text-ink-muted",
+  "[&_th]:whitespace-nowrap [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-ink-muted",
   "[&_td]:border-b [&_td]:border-slate-100 [&_td]:px-4 [&_td]:py-3 [&_td]:align-middle",
   "[&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-slate-50/70",
 );
@@ -173,10 +184,33 @@ export const tableClass = cx(
 export function Empty({ icon, title, children, action }: { icon?: ReactNode; title?: ReactNode; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center px-6 py-12 text-center">
-      {icon && <div className="mb-3 flex size-11 items-center justify-center rounded-full bg-slate-100 text-ink-muted [&_svg]:size-5">{icon}</div>}
+      {icon && <div className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 ring-1 ring-brand-100 [&_svg]:size-5">{icon}</div>}
       {title && <p className="text-sm font-semibold text-ink">{title}</p>}
       {children && <p className="mt-1 max-w-sm text-sm text-ink-muted">{children}</p>}
       {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+const STAT_TONES: Record<Tone, string> = {
+  slate: "bg-slate-100 text-slate-600",
+  green: "bg-emerald-50 text-emerald-600",
+  amber: "bg-amber-50 text-amber-600",
+  red: "bg-red-50 text-red-600",
+  blue: "bg-brand-50 text-brand-600",
+  violet: "bg-violet-50 text-violet-600",
+};
+
+/** KPI tile: icon chip, label, big number and a one-line hint. */
+export function StatTile({ label, value, hint, icon, tone = "blue" }: { label: ReactNode; value: ReactNode; hint?: ReactNode; icon?: ReactNode; tone?: Tone }) {
+  return (
+    <div className="rounded-xl border border-line bg-surface px-5 py-4 shadow-card">
+      <div className="flex items-start justify-between gap-3">
+        <dt className="text-xs font-medium text-ink-muted">{label}</dt>
+        {icon && <span aria-hidden className={cx("flex size-8 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4", STAT_TONES[tone])}>{icon}</span>}
+      </div>
+      <dd className="mt-1 text-3xl font-semibold tracking-tight tabular-nums text-ink">{value}</dd>
+      {hint && <dd className="mt-1 truncate text-xs text-ink-muted">{hint}</dd>}
     </div>
   );
 }

@@ -1,9 +1,9 @@
-import { ArrowLeft, ArrowRight, BarChart3, CopyX, ExternalLink } from "lucide-react";
+import { ArrowLeft, ArrowRight, BarChart3, Building2, CalendarDays, CopyX, ExternalLink, Inbox, Sun } from "lucide-react";
 import Link from "next/link";
 import { DashboardClientPicker } from "@/components/DashboardClientPicker";
 import { LeadsBarChart } from "@/components/LeadsBarChart";
 import { LeadsTrendChart } from "@/components/LeadsTrendChart";
-import { Avatar, buttonClass, Card, cx, Empty, PageHeader, tableClass } from "@/components/ui";
+import { Avatar, buttonClass, Card, cx, Empty, PageHeader, StatTile, tableClass, type Tone } from "@/components/ui";
 import { dashboardCounts, dashboardTrend } from "@/lib/dashboard";
 import { listClientOptions } from "@/lib/data";
 import { RANGES, type RangeId } from "@/lib/leadFilterSpec";
@@ -58,17 +58,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
 
   const withLeads = rows.filter((r) => r.inRange > 0).length;
   const top = rows[0]?.inRange ? rows[0] : null;
-  const tiles = [
+  const tiles: { label: string; value: string; hint: string; icon: React.ReactNode; tone: Tone }[] = [
     {
+      icon: <Inbox />,
+      tone: "blue",
       label: `Leads · ${rangeLabel}`,
       value: fmt(totals.inRange),
       hint: hideDupes
         ? `${fmt(totals.duplicates)} duplicate${totals.duplicates === 1 ? "" : "s"} left out`
         : range ? `${fmt(totals.allTime)} all time` : `Across ${rows.length} ${noun}${rows.length === 1 ? "" : "s"}`,
     },
-    { label: "Today", value: fmt(totals.today), hint: "Since midnight IST" },
-    { label: "Last 7 days", value: fmt(totals.last7), hint: `${fmt(totals.last30)} in 30 days` },
-    { label: oneClient ? "Pages with leads" : "Clients with leads", value: `${withLeads} / ${rows.length}`, hint: top ? `Most: ${top.name}` : `None · ${rangeLabel.toLowerCase()}` },
+    { icon: <Sun />, tone: "amber", label: "Today", value: fmt(totals.today), hint: "Since midnight IST" },
+    { icon: <CalendarDays />, tone: "violet", label: "Last 7 days", value: fmt(totals.last7), hint: `${fmt(totals.last30)} in 30 days` },
+    { icon: <Building2 />, tone: "green", label: oneClient ? "Pages with leads" : "Clients with leads", value: `${withLeads} / ${rows.length}`, hint: top ? `Most: ${top.name}` : `None · ${rangeLabel.toLowerCase()}` },
   ];
 
   return (
@@ -125,11 +127,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
 
       <dl className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {tiles.map((t) => (
-          <div key={t.label} className="rounded-xl border border-line bg-surface px-5 py-4">
-            <dt className="text-xs font-medium text-ink-muted">{t.label}</dt>
-            <dd className="mt-1.5 text-3xl font-semibold tracking-tight tabular-nums text-ink">{t.value}</dd>
-            <dd className="mt-1 truncate text-xs text-ink-muted">{t.hint}</dd>
-          </div>
+          <StatTile key={t.label} label={t.label} value={t.value} hint={t.hint} icon={t.icon} tone={t.tone} />
         ))}
       </dl>
 
