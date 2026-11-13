@@ -1,22 +1,22 @@
 @import "tailwindcss";
 
-/* Design tokens. Calm and understated: muted pine-teal primary on warm neutrals, no gradients. */
+/* Design tokens. Calm and understated: muted terracotta primary on warm neutrals, no gradients. */
 @theme {
   --font-sans: var(--font-ui-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-fira-code), ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-brand-50: #f1f7f6;
-  --color-brand-100: #dcebe9;
-  --color-brand-200: #b9d7d3;
-  --color-brand-300: #8dbcb6;
-  --color-brand-400: #5e9e97;
-  --color-brand-500: #3a817a;
-  --color-brand-600: #276a64;
-  --color-brand-700: #1f5853;
-  --color-brand-800: #1a4845;
-  --color-brand-900: #163c3a;
-  --color-brand-950: #0c2524;
-  --color-accent-500: #b7791f;
+  --color-brand-50: #fcf5f2;
+  --color-brand-100: #f7e6df;
+  --color-brand-200: #eecbbf;
+  --color-brand-300: #e1a690;
+  --color-brand-400: #d1836a;
+  --color-brand-500: #c3694d;
+  --color-brand-600: #b4553a;
+  --color-brand-700: #9f4a32;
+  --color-brand-800: #833d2a;
+  --color-brand-900: #6b3324;
+  --color-brand-950: #3a1911;
+  --color-accent-500: #3d6b5e;
 
   --color-canvas: #f7f7f4;
   --color-surface: #ffffff;
