@@ -6,8 +6,8 @@ import { useState } from "react";
 export function CopyBox({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-start gap-2 rounded-lg bg-slate-900 p-1.5 pl-3.5">
-      <pre className="min-w-0 flex-1 overflow-x-auto py-2 font-mono text-[13px] leading-relaxed text-slate-100">{value}</pre>
+    <div className="flex items-start gap-2 rounded-lg bg-slate-900 p-1.5 pl-3.5 ring-1 ring-line">
+      <pre className="min-w-0 flex-1 overflow-x-auto py-2 font-mono text-[13px] leading-relaxed text-brand-800">{value}</pre>
       <button
         type="button"
         onClick={() =>

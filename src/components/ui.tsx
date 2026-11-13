@@ -10,7 +10,7 @@ export function buttonClass(variant: ButtonProps["variant"] = "primary", size: B
   return cx(
     "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition-all duration-150 active:translate-y-px disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
     size === "sm" ? "h-8 px-3 text-sm" : "h-9 px-4 text-sm",
-    variant === "primary" && "bg-brand-700 text-white shadow-sm hover:bg-brand-800",
+    variant === "primary" && "bg-brand-700 text-brand-950 shadow-sm hover:bg-brand-800",
     variant === "secondary" && "border border-line bg-surface text-ink shadow-sm hover:border-slate-300 hover:bg-slate-50",
     variant === "ghost" && "text-ink-muted hover:bg-slate-100 hover:text-ink",
     variant === "danger" && "bg-red-600 text-white shadow-sm hover:bg-red-700",
@@ -175,10 +175,10 @@ export function PageHeader({
 
 export const tableClass = cx(
   "w-full border-separate border-spacing-0 text-left text-sm",
-  "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:border-b [&_thead_th]:border-line [&_thead_th]:bg-[#fafaf8]/95 [&_thead_th]:backdrop-blur",
+  "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:border-b [&_thead_th]:border-line [&_thead_th]:bg-slate-50/95 [&_thead_th]:backdrop-blur",
   "[&_th]:whitespace-nowrap [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-ink-muted",
   "[&_td]:border-b [&_td]:border-slate-100 [&_td]:px-4 [&_td]:py-3 [&_td]:align-middle",
-  "[&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-[#f7f7f4]",
+  "[&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-slate-50",
 );
 
 export function Empty({ icon, title, children, action }: { icon?: ReactNode; title?: ReactNode; children?: ReactNode; action?: ReactNode }) {

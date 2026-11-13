@@ -63,7 +63,7 @@ export function ColumnPicker({ columns, hidden }: { columns: { id: string; heade
         {hiddenCount > 0 && <span className="rounded-full bg-brand-50 px-1.5 text-xs font-semibold text-brand-700">{hiddenCount} hidden</span>}
       </button>
       {open && (
-        <div role="dialog" aria-label="Choose columns" className="absolute right-0 top-full z-30 mt-1 flex max-h-[70vh] w-80 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-sm shadow-xl">
+        <div role="dialog" aria-label="Choose columns" className="absolute right-0 top-full z-30 mt-1 flex max-h-[70vh] w-80 flex-col overflow-hidden rounded-lg border border-slate-200 bg-surface text-sm shadow-xl">
           <div className="border-b border-slate-100 p-3">
             <p className="mb-2 text-xs text-ink-muted">Unticked columns are hidden from the table. You still see them when you open a lead.</p>
             <input

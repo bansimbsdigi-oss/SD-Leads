@@ -65,7 +65,7 @@ export function Pagination({
             value={pageSize}
             // Back to page 1, since the old page number means something else at a new size.
             onChange={(e) => router.push(href({ size: Number(e.target.value) === defaultSize ? null : e.target.value, page: null }))}
-            className="h-8 rounded-md border border-slate-300 bg-white px-1.5 text-sm text-slate-800"
+            className="h-8 rounded-md border border-slate-300 bg-surface px-1.5 text-sm text-slate-800"
           >
             {sizes.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>

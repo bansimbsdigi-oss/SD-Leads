@@ -30,7 +30,7 @@ export function AppShell({
   const sidebar = (
     <div className="flex h-full flex-col border-r border-nav-line bg-nav text-nav-ink">
       <div className="relative flex h-16 items-center gap-3 px-5">
-        <span aria-hidden className="flex size-8 items-center justify-center rounded-lg bg-brand-700 text-sm font-bold text-white">S</span>
+        <span aria-hidden className="flex size-8 items-center justify-center rounded-lg bg-brand-700 text-sm font-bold text-brand-950">S</span>
         <span className="min-w-0">
           <span className="block text-[15px] font-semibold leading-tight tracking-tight text-ink">Sabhi Leads</span>
           <span className="block text-[11px] leading-tight text-ink-muted">Lead platform</span>
@@ -90,7 +90,7 @@ export function AppShell({
         <button aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)} className="-ml-2 rounded-md p-2 text-ink-muted hover:bg-slate-100">
           <Menu aria-hidden className="size-5" />
         </button>
-        <span aria-hidden className="flex size-7 items-center justify-center rounded-lg bg-brand-700 text-xs font-bold text-white">S</span>
+        <span aria-hidden className="flex size-7 items-center justify-center rounded-lg bg-brand-700 text-xs font-bold text-brand-950">S</span>
         <span className="font-semibold text-ink">Sabhi Leads</span>
       </header>
       {open && (

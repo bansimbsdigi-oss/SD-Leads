@@ -171,7 +171,7 @@ export function ColumnHeader({
           role="dialog"
           aria-label={`${label} sort and filter`}
           style={{ top: pos.top, left: pos.left, maxHeight: pos.maxHeight }}
-          className="fixed z-30 flex w-[300px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-left font-normal normal-case text-slate-700 shadow-xl"
+          className="fixed z-30 flex w-[300px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-surface text-left font-normal normal-case text-slate-700 shadow-xl"
         >
           <div className="border-b border-slate-100 py-1">
             <button type="button" className={menuItem} onClick={() => navigate({ sort: columnId, dir: "asc" })}>
@@ -198,7 +198,7 @@ export function ColumnHeader({
                       aria-label="Condition"
                       value={condOp}
                       onChange={(e) => setCondOp(e.target.value as Op | "")}
-                      className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm"
+                      className="h-8 w-full rounded-md border border-slate-300 bg-surface px-2 text-sm"
                     >
                       <option value="">None</option>
                       {ops.map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}

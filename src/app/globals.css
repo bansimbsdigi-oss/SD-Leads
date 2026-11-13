@@ -1,40 +1,102 @@
 @import "tailwindcss";
 
-/* Design tokens. Calm and understated: muted terracotta primary on warm neutrals, no gradients. */
+/* Design tokens. "Midnight": a full dark theme with sky-blue highlights.
+   The stock Tailwind palettes used across the app are redefined for a dark page: light neutrals are dark
+   surfaces, pale tints are deep tints, and the darker text shades are the light ones. So `bg-red-50
+   text-red-700` (a light-mode badge) reads as a deep red chip with light red text here. */
 @theme {
   --font-sans: var(--font-ui-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-fira-code), ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-brand-50: #fcf5f2;
-  --color-brand-100: #f7e6df;
-  --color-brand-200: #eecbbf;
-  --color-brand-300: #e1a690;
-  --color-brand-400: #d1836a;
-  --color-brand-500: #c3694d;
-  --color-brand-600: #b4553a;
-  --color-brand-700: #9f4a32;
-  --color-brand-800: #833d2a;
-  --color-brand-900: #6b3324;
-  --color-brand-950: #3a1911;
-  --color-accent-500: #3d6b5e;
+  /* Sky blue. 700 is the main accent (links, primary buttons with dark text); 50-200 are tints. */
+  --color-brand-50: #0c2233;
+  --color-brand-100: #0f2c42;
+  --color-brand-200: #164563;
+  --color-brand-300: #075985;
+  --color-brand-400: #0284c7;
+  --color-brand-500: #0ea5e9;
+  --color-brand-600: #38bdf8;
+  --color-brand-700: #38bdf8;
+  --color-brand-800: #7dd3fc;
+  --color-brand-900: #bae6fd;
+  --color-brand-950: #04121f;
+  --color-accent-500: #f59e0b;
 
-  --color-canvas: #f7f7f4;
-  --color-surface: #ffffff;
-  --color-line: #e7e6e1;
-  --color-ink: #1c1d1f;
-  --color-ink-muted: #686a70;
+  --color-canvas: #0b1120;
+  --color-surface: #111827;
+  --color-line: #1f2a3d;
+  --color-ink: #e5e9f0;
+  --color-ink-muted: #94a3b8;
 
-  /* Sidebar: light, a shade off the page */
-  --color-nav: #fbfbf9;
-  --color-nav-line: #e7e6e1;
-  --color-nav-ink: #55575d;
+  --color-nav: #0d1526;
+  --color-nav-line: #1c2638;
+  --color-nav-ink: #94a3b8;
 
-  --shadow-card: 0 1px 2px rgb(28 29 31 / 0.04);
-  --shadow-lift: 0 6px 16px -6px rgb(28 29 31 / 0.12), 0 2px 4px -2px rgb(28 29 31 / 0.05);
+  /* Neutrals: 50-300 are raised surfaces and lines, 500-800 text; 900 stays near-black (overlays, code). */
+  --color-slate-50: #172133;
+  --color-slate-100: #1d283b;
+  --color-slate-200: #2a3850;
+  --color-slate-300: #3a4961;
+  --color-slate-400: #64748b;
+  --color-slate-500: #8b98ad;
+  --color-slate-600: #a4b0c3;
+  --color-slate-700: #c4cddb;
+  --color-slate-800: #dce3ed;
+  --color-slate-900: #020617;
+  --color-stone-100: #1d283b;
+  --color-stone-300: #3a4961;
+  --color-stone-400: #64748b;
+  --color-stone-600: #a4b0c3;
+
+  /* Status and badge hues: 50-200 deep tints, 500-600 solid, 700-900 light text. */
+  --color-red-50: #2a1214;
+  --color-red-100: #3b1518;
+  --color-red-200: #5c1d22;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #fca5a5;
+  --color-red-800: #fecaca;
+  --color-red-900: #fee2e2;
+  --color-emerald-50: #0b2620;
+  --color-emerald-100: #0e3329;
+  --color-emerald-200: #134e3d;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #34d399;
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+  --color-amber-50: #2a1f0b;
+  --color-amber-100: #3a2a0d;
+  --color-amber-200: #5a3f12;
+  --color-amber-500: #f59e0b;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-amber-900: #fef3c7;
+  --color-violet-50: #1d1836;
+  --color-violet-100: #262047;
+  --color-violet-200: #3b3170;
+  --color-violet-500: #8b5cf6;
+  --color-violet-700: #c4b5fd;
+  --color-violet-800: #ddd6fe;
+  --color-sky-50: #0c2233;
+  --color-sky-100: #0f2c42;
+  --color-sky-700: #7dd3fc;
+  --color-sky-800: #bae6fd;
+  --color-rose-100: #3b1520;
+  --color-rose-800: #fecdd3;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-lift: 0 10px 24px -8px rgb(0 0 0 / 0.5), 0 4px 8px -4px rgb(0 0 0 / 0.35);
 }
 
 html {
   -webkit-text-size-adjust: 100%;
+  color-scheme: dark; /* native controls (selects, date pickers, scrollbars, checkboxes) in dark */
+}
+
+/* Dialogs default to a white canvas in browsers. */
+dialog {
+  background: var(--color-surface);
+  color: var(--color-ink);
 }
 
 body {
