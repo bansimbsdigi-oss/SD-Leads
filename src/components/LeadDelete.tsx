@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { deleteLeadAction, deleteLeadsAction } from "@/app/actions";
+import { Tag, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { assignLeadsAction, bulkTagAction, deleteLeadAction, deleteLeadsAction, setLeadStatusAction } from "@/app/actions";
 import { Button } from "@/components/ui";
 
 const FORM_ID = "bulk-delete";
@@ -74,14 +76,37 @@ export function SelectAllCheckbox() {
   );
 }
 
+type Option = { id: string; name: string };
+
 /**
- * "Delete selected" bar; the row checkboxes belong to this form. With every row on the page ticked it
- * offers to select all `total` leads matching the filters, on every page (`query` is the list's filters,
- * `upto` when the list was loaded).
+ * Bar for the ticked leads: set status, assign, tag, delete. The row checkboxes belong to its form.
+ * With every row on the page ticked it offers to select all `total` leads matching the filters, on every
+ * page, for deleting (`query` is the list's filters, `upto` when the list was loaded). `stages` / `owners`
+ * are set when the page shows one client (statuses and people differ per client).
  */
-export function BulkDeleteBar({ total, capped, query, upto }: { total: number; capped: boolean; query: string; upto: string }) {
+export function BulkDeleteBar({
+  total,
+  capped,
+  query,
+  upto,
+  stages,
+  owners,
+  canDelete,
+}: {
+  total: number;
+  capped: boolean;
+  query: string;
+  upto: string;
+  stages: Option[] | null;
+  owners: Option[] | null;
+  canDelete: boolean;
+}) {
+  const router = useRouter();
   const { selected, total: onPage } = useSelection();
   const [allPages, setAllPages] = useState(false);
+  const [tag, setTag] = useState("");
+  const [pending, startTransition] = useTransition();
+  const [note, setNote] = useState<string | null>(null);
   const pageFull = onPage > 0 && selected === onPage;
   const all = allPages && pageFull; // unticking a row goes back to "this page only"
   const totalLabel = `${total.toLocaleString("en-IN")}${capped ? "+" : ""}`;
@@ -93,6 +118,23 @@ export function BulkDeleteBar({ total, capped, query, upto }: { total: number; c
     window.dispatchEvent(new Event(CHANGED));
   }
 
+  /** Runs a change on the ticked leads, then reloads the list. */
+  function run(label: string, act: (ids: string[]) => Promise<{ error?: string; count?: number }>) {
+    const ids = boxes().filter((b) => b.checked).map((b) => b.value);
+    if (!ids.length) return;
+    startTransition(async () => {
+      const r = await act(ids);
+      if (r.error) {
+        alert(r.error);
+        return;
+      }
+      setNote(`${label}: ${r.count ?? 0} lead${r.count === 1 ? "" : "s"} updated.`);
+      clear();
+      router.refresh();
+    });
+  }
+  const select = "h-8 rounded-md border border-line bg-surface px-2 text-sm text-ink";
+
   return (
     <form
       id={FORM_ID}
@@ -103,8 +145,9 @@ export function BulkDeleteBar({ total, capped, query, upto }: { total: number; c
           : confirm(`Delete ${selected} lead${selected === 1 ? "" : "s"}? This cannot be undone.`);
         if (!ok) e.preventDefault();
       }}
-      className={selected ? "mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-red-50 px-3 py-2 text-sm" : "hidden"}
+      className={selected ? "mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-brand-50 px-3 py-2 text-sm ring-1 ring-brand-200" : note ? "mb-3 block" : "hidden"}
     >
+      {!selected && note && <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 ring-1 ring-emerald-200">{note}</p>}
       {all && (
         <>
           <input type="hidden" name="all" value="1" />
@@ -112,10 +155,58 @@ export function BulkDeleteBar({ total, capped, query, upto }: { total: number; c
           <input type="hidden" name="upto" value={upto} />
         </>
       )}
-      <span className="font-medium text-red-800">{count} selected</span>
-      <Button type="submit" variant="danger" size="sm">{all ? `Delete all ${totalLabel}` : "Delete selected"}</Button>
-      <button type="button" className="text-slate-600 hover:underline" onClick={clear}>Cancel</button>
-      {pageFull && total > onPage && (
+      {selected > 0 && <span className="font-semibold text-brand-800">{count} selected</span>}
+      {selected > 0 && !all && (
+        <>
+          {stages && (
+            <select aria-label="Set status" className={select} value="" disabled={pending} onChange={(e) => {
+              const v = e.target.value;
+              if (v) run("Status set", (ids) => setLeadStatusAction(ids, v === "__none" ? null : v));
+            }}>
+              <option value="">Set status…</option>
+              {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <option value="__none">No status</option>
+            </select>
+          )}
+          {owners && (
+            <select aria-label="Assign to" className={select} value="" disabled={pending} onChange={(e) => {
+              const v = e.target.value;
+              if (v) run("Assigned", (ids) => assignLeadsAction(ids, v === "__none" ? null : v));
+            }}>
+              <option value="">Assign to…</option>
+              {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              <option value="__none">Unassigned</option>
+            </select>
+          )}
+          <span className="inline-flex items-center gap-1">
+            <input
+              aria-label="Tag to add"
+              value={tag}
+              onChange={(e) => setTag(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (tag.trim()) run(`Tagged “${tag.trim()}”`, (ids) => bulkTagAction(ids, tag));
+                  setTag("");
+                }
+              }}
+              placeholder="Tag, e.g. VIP"
+              maxLength={40}
+              className={`${select} w-32`}
+            />
+            <Button type="button" variant="secondary" size="sm" disabled={pending || !tag.trim()} onClick={() => {
+              run(`Tagged “${tag.trim()}”`, (ids) => bulkTagAction(ids, tag));
+              setTag("");
+            }}>
+              <Tag aria-hidden /> Add tag
+            </Button>
+          </span>
+          {!stages && <span className="text-xs text-ink-muted">Pick one client to change status or owner in bulk.</span>}
+        </>
+      )}
+      {selected > 0 && canDelete && <Button type="submit" variant="danger" size="sm" disabled={pending}><Trash2 aria-hidden /> {all ? `Delete all ${totalLabel}` : "Delete"}</Button>}
+      {selected > 0 && <button type="button" className="text-ink-muted hover:underline" onClick={clear}>Cancel</button>}
+      {canDelete && pageFull && total > onPage && (
         <span className="text-slate-700">
           {all ? `All ${totalLabel} leads matching these filters are selected.` : `All ${onPage} leads on this page are selected.`}{" "}
           <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => setAllPages(!all)}>

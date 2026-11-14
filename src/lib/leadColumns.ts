@@ -42,6 +42,7 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
     { id: "email", header: "email", value: (l) => l.emailNormalised ?? "" },
     ...STANDARD_COLUMNS.map<Column>((c) => {
       const keys = columnKeys(c, absorbed, trackAbsorbed);
+      if (c.id === "s:tag") return { id: c.id, header: c.header, value: (l) => l.tags.join(", ") || standardValue(c, l, formatAnswer, keys) };
       return { id: c.id, header: c.header, value: (l) => standardValue(c, l, formatAnswer, keys) };
     }),
     { id: "status", header: "Status", value: (l) => l.status?.name ?? "" },

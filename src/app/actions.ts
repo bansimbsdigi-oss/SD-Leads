@@ -20,6 +20,7 @@ import {
   setWebhookStatus,
   updateWebhookRule,
 } from "@/lib/outbound/webhooks";
+import { addNote, assignLeads, bulkTag, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
 
@@ -177,6 +178,50 @@ export async function createUserAction(_: ActionState, fd: FormData): Promise<Ac
   } catch (err) {
     return { error: errorMessage(err) };
   }
+}
+
+// ---------- Working leads (status, owner, tags, notes, details) ----------
+
+type Done = { error?: string; count?: number };
+
+async function leadAction(run: (ctx: Awaited<ReturnType<typeof requireCtx>>) => Promise<number | void>, leadId?: string): Promise<Done> {
+  const ctx = await requireCtx();
+  try {
+    const count = await run(ctx);
+    revalidatePath("/leads");
+    if (leadId) revalidatePath(`/leads/${leadId}`);
+    return { count: typeof count === "number" ? count : undefined };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function setLeadStatusAction(ids: string[], statusId: string | null) {
+  return leadAction((ctx) => setLeadStatus(ctx, ids, statusId), ids.length === 1 ? ids[0] : undefined);
+}
+
+export async function assignLeadsAction(ids: string[], ownerId: string | null) {
+  return leadAction((ctx) => assignLeads(ctx, ids, ownerId), ids.length === 1 ? ids[0] : undefined);
+}
+
+export async function setLeadTagsAction(id: string, tags: string[]) {
+  return leadAction((ctx) => setLeadTags(ctx, id, tags), id);
+}
+
+export async function bulkTagAction(ids: string[], tag: string, remove = false) {
+  return leadAction((ctx) => bulkTag(ctx, ids, tag, remove));
+}
+
+export async function addNoteAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const id = str(fd, "id");
+  const r = await leadAction((ctx) => addNote(ctx, id, String(fd.get("text") ?? "")), id);
+  return r.error ? { error: r.error } : { ok: "Note added." };
+}
+
+export async function editLeadAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const id = str(fd, "id");
+  const r = await leadAction((ctx) => editLeadDetails(ctx, id, { name: str(fd, "name"), phone: str(fd, "phone"), email: str(fd, "email") }), id);
+  return r.error ? { error: r.error } : { ok: "Saved." };
 }
 
 export async function updateUserAction(_: ActionState, fd: FormData): Promise<ActionState> {

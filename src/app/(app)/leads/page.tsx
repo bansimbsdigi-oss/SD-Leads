@@ -4,12 +4,14 @@ import Link from "next/link";
 import { ColumnHeader } from "@/components/ColumnHeader";
 import { ColumnPicker } from "@/components/ColumnPicker";
 import { BulkDeleteBar, RowCheckbox, SelectAllCheckbox } from "@/components/LeadDelete";
+import { LeadInlineSelect } from "@/components/LeadInlineSelect";
 import { LeadToolbar } from "@/components/LeadToolbar";
 import { Pagination } from "@/components/Pagination";
-import { Avatar, Badge, buttonClass, Card, Empty, PageHeader, StatusBadge, tableClass } from "@/components/ui";
+import { Avatar, Badge, buttonClass, Card, Empty, PageHeader, tableClass } from "@/components/ui";
 import { listClientOptions } from "@/lib/data";
 import { ALWAYS_SHOWN, HIDDEN_COLUMNS_COOKIE, parseHiddenColumns } from "@/lib/hiddenColumns";
 import { leadColumns } from "@/lib/leadColumns";
+import { editOptions } from "@/lib/leadEdit";
 import { DEFAULT_PAGE_SIZE, leadFieldDefs, PAGE_SIZES, parseLeadQuery, queryLeads, queryToParams, toFieldMeta } from "@/lib/leadQuery";
 import { requireCtx } from "@/lib/session";
 import { can, isSabhiStaff } from "@/lib/tenant";
@@ -30,13 +32,19 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
   ]);
   const { rows: leads, total, totalCapped } = await queryLeads(ctx, query, defs);
   const columns = allColumns.filter((c) => ALWAYS_SHOWN.has(c.id) || !hidden.has(c.id));
+  // Status / owner dropdowns: options per client on this page. Bulk changes need one client in view.
+  const pageClients = [...new Set(leads.map((l) => l.clientId))];
+  const edit = await editOptions(ctx, pageClients);
+  const bulkClient = pageClients.length === 1 ? pageClients[0] : null;
 
   const selectedClient = clients.find((c) => c.id === query.clientId);
   const filtered = Boolean(query.q || query.range || query.hideDuplicates || query.conditions.length);
   const exportParams = queryToParams(query, { page: undefined, size: undefined });
   // Super admins, and client admins for their own client, can delete. Rows of other clients get no checkbox.
   const canDelete = (clientId: string) => can.deleteLeads(ctx, clientId);
-  const showSelect = leads.some((l) => canDelete(l.clientId));
+  // Everyone who sees a lead can work on it (status, tags); deleting is for admins.
+  const showSelect = leads.length > 0;
+  const deletable = leads.some((l) => canDelete(l.clientId));
   const fieldMeta = toFieldMeta(defs);
   const numeric = new Set(defs.filter((d) => d.kind === "number" || d.kind === "bool").map((d) => d.id));
 
@@ -88,6 +96,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
               <div className="px-4 pt-3 has-[form.hidden]:hidden">
                 <BulkDeleteBar
                   key={`${query.page}-${leads.map((l) => l.id).join()}`}
+                  stages={bulkClient ? edit.stages[bulkClient] ?? [] : null}
+                  owners={bulkClient && edit.canAssign ? edit.owners[bulkClient] ?? [] : null}
+                  canDelete={deletable}
                   total={total}
                   capped={totalCapped}
                   query={queryToParams(query, { page: undefined, size: undefined, sort: undefined, dir: undefined }).toString()}
@@ -118,7 +129,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                 <tbody>
                   {leads.map((lead) => (
                     <tr key={lead.id}>
-                      {showSelect && <td className="!pr-0">{canDelete(lead.clientId) && <RowCheckbox id={lead.id} label={lead.name ?? "lead"} />}</td>}
+                      {showSelect && <td className="!pr-0"><RowCheckbox id={lead.id} label={lead.name ?? "lead"} /></td>}
                       {columns.map((c) => {
                         const v = c.value(lead);
                         switch (c.id) {
@@ -133,7 +144,19 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                               </td>
                             );
                           case "status":
-                            return <td key={c.id}><StatusBadge name={v} /></td>;
+                            return (
+                              <td key={c.id} className="whitespace-nowrap">
+                                <LeadInlineSelect leadId={lead.id} kind="status" value={lead.statusId} options={edit.stages[lead.clientId] ?? []} />
+                              </td>
+                            );
+                          case "owner":
+                            return (
+                              <td key={c.id} className="whitespace-nowrap">
+                                {edit.canAssign
+                                  ? <LeadInlineSelect leadId={lead.id} kind="owner" value={lead.ownerId} options={edit.owners[lead.clientId] ?? []} />
+                                  : v || <Dash />}
+                              </td>
+                            );
                           case "source":
                             return <td key={c.id}><Badge>{v}</Badge></td>;
                           case "created_at":

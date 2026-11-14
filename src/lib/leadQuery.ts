@@ -354,6 +354,7 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
     { id: "source", label: "Received via", kind: "choice", group: "Lead", exact: true, options: SOURCES, expr: Prisma.sql`l.source`, sort: Prisma.sql`l.source` },
     ...STANDARD_COLUMNS.map<FieldDef>((c) => {
       const parts = columnKeys(c, absorbed, trackAbsorbed).flatMap((k) => [Prisma.sql`NULLIF(l.answers ->> ${k}, '')`, Prisma.sql`NULLIF(l.tracking ->> ${k}, '')`]);
+      if (c.id === "s:tag") parts.unshift(Prisma.sql`NULLIF(array_to_string(l.tags, ', '), '')`); // tags added by hand come first
       if (c.fallback === "whatsapp_from_phone") parts.push(Prisma.sql`NULLIF(ltrim(l.phone_normalised, '+'), '')`);
       if (c.fallback === "received_via") {
         parts.push(Prisma.sql`CASE l.source ${Prisma.join(Object.entries(RECEIVED_VIA_LABEL).map(([v, lbl]) => Prisma.sql`WHEN ${v} THEN ${lbl}`), " ")} ELSE l.source END`);

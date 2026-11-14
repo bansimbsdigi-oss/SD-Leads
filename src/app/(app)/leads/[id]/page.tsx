@@ -1,8 +1,10 @@
-import { CheckCircle2, Copy, FileInput, MousePointerClick, UserRound, XCircle } from "lucide-react";
+import { CheckCircle2, Copy, FileInput, MousePointerClick, Pencil, StickyNote, Tag, UserRound, XCircle } from "lucide-react";
 import Link from "next/link";
 import { DeleteLeadButton } from "@/components/LeadDelete";
+import { LeadManage } from "@/components/LeadManage";
 import { Avatar, Badge, Card, PageHeader, Stat, StatusBadge } from "@/components/ui";
 import { getLead, listFields } from "@/lib/data";
+import { editOptions, tagSuggestions } from "@/lib/leadEdit";
 import { formatAnswer, formatDateTime } from "@/lib/leadColumns";
 import { orNotFound, requireCtx } from "@/lib/session";
 import { can, isSabhiStaff } from "@/lib/tenant";
@@ -14,13 +16,37 @@ const EVENT_LABEL: Record<string, { label: string; icon: typeof FileInput }> = {
   duplicate_of: { label: "Marked as duplicate", icon: Copy },
   status_changed: { label: "Status changed", icon: MousePointerClick },
   assigned: { label: "Assigned", icon: UserRound },
+  note: { label: "Note", icon: StickyNote },
+  edited: { label: "Details edited", icon: Pencil },
+  tags_changed: { label: "Tags changed", icon: Tag },
 };
+
+const FIELD_LABEL: Record<string, string> = { name: "Name", phone: "Mobile", email: "Email" };
+
+/** One line saying what an event changed, from its payload. */
+function eventDetail(type: string, payload: unknown): string | null {
+  const p = (payload ?? {}) as Record<string, unknown>;
+  switch (type) {
+    case "status_changed": return p.to ? `to ${p.to}` : "cleared";
+    case "assigned": return p.to ? `to ${p.to}` : "unassigned";
+    case "tags_changed": return Array.isArray(p.tags) && p.tags.length ? (p.tags as string[]).join(", ") : "all tags removed";
+    case "edited": {
+      const changes = (p.changes ?? {}) as Record<string, { from: string | null; to: string | null }>;
+      return Object.entries(changes).map(([k, c]) => `${FIELD_LABEL[k] ?? k}: ${c.from ?? "—"} → ${c.to ?? "—"}`).join(" · ") || null;
+    }
+    default: return null;
+  }
+}
 
 export default async function LeadPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await requireCtx();
   const lead = await orNotFound(getLead(ctx, id));
-  const fields = lead.lpId ? await listFields(ctx, lead.lpId) : [];
+  const [fields, edit, suggestions] = await Promise.all([
+    lead.lpId ? listFields(ctx, lead.lpId) : Promise.resolve([]),
+    editOptions(ctx, [lead.clientId]),
+    tagSuggestions(ctx, lead.clientId),
+  ]);
   const answers = lead.answers as Record<string, unknown>;
   const scores = lead.scores as Record<string, number>;
   const known = new Set(fields.map((f) => f.fieldKey));
@@ -108,7 +134,16 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           </Card>
         </div>
 
-        <Card title="Timeline" className="self-start">
+        <div className="space-y-6 self-start">
+        <Card title="Manage">
+          <LeadManage
+            lead={{ id: lead.id, statusId: lead.statusId, ownerId: lead.ownerId, ownerName: lead.owner?.name ?? null, tags: lead.tags, name: lead.name, phone: lead.phoneNormalised, email: lead.emailNormalised }}
+            stages={edit.stages[lead.clientId] ?? []}
+            owners={edit.canAssign ? edit.owners[lead.clientId] ?? [] : null}
+            suggestions={suggestions}
+          />
+        </Card>
+        <Card title="Timeline">
           <ol className="relative space-y-5 before:absolute before:bottom-2 before:left-[13px] before:top-2 before:w-px before:bg-line">
             {lead.events.map((e) => {
               const meta = EVENT_LABEL[e.type] ?? { label: e.type.replace(/_/g, " "), icon: FileInput };
@@ -120,6 +155,10 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                   </span>
                   <div className="min-w-0 pt-0.5">
                     <p className="text-sm font-medium">{meta.label}</p>
+                    {e.type === "note" && (
+                      <p className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-slate-50 px-3 py-2 text-sm text-ink">{String((e.payload as { text?: string }).text ?? "")}</p>
+                    )}
+                    {eventDetail(e.type, e.payload) && <p className="break-words text-xs text-ink">{eventDetail(e.type, e.payload)}</p>}
                     {e.type === "duplicate_of" && (
                       <Link className="text-xs text-brand-700 hover:underline" href={`/leads/${(e.payload as { leadId: string }).leadId}`}>View original lead</Link>
                     )}
@@ -130,6 +169,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             })}
           </ol>
         </Card>
+        </div>
       </div>
     </>
   );

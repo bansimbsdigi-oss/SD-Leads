@@ -42,6 +42,8 @@ enum LeadEventType {
   whatsapp
   follow_up_set
   meta_sent
+  edited
+  tags_changed
 }
 
 enum IntegrationType {
@@ -226,6 +228,8 @@ model Lead {
   isDuplicate     Boolean   @default(false) @map("is_duplicate")
   duplicateOfId   String?   @map("duplicate_of_id")
   followUpAt      DateTime? @map("follow_up_at")
+  /// Labels the team adds by hand ("VIP", "Paid", "No answer"); shown in the tag column.
+  tags            String[]  @default([])
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   lastActivityAt  DateTime  @default(now()) @map("last_activity_at")
@@ -245,6 +249,7 @@ model Lead {
   @@index([clientId, phoneNormalised]) // dedupe stays inside one client
   @@index([clientId, emailNormalised])
   @@index([clientId, statusId])
+  @@index([tags], type: Gin)
   @@index([clientId, ownerId])
   @@index([duplicateOfId])
   @@index([answers(ops: JsonbPathOps)], type: Gin)
