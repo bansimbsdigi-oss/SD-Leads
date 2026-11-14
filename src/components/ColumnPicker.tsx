@@ -4,10 +4,14 @@ import { Columns3 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Button, buttonClass } from "@/components/ui";
-import { ALWAYS_SHOWN, writeHiddenColumns } from "@/lib/hiddenColumns";
+import { saveColumnsAction } from "@/app/actions";
+import { ALWAYS_SHOWN } from "@/lib/hiddenColumns";
 
-/** "Columns" button: tick the columns to show in the table. Unticked ones still show on the lead's page. */
-export function ColumnPicker({ columns, hidden }: { columns: { id: string; header: string }[]; hidden: string[] }) {
+/**
+ * "Columns" button: tick the columns to show in the table. Unticked ones still show on the lead's page.
+ * Saved per user and per view (`scope`: one client, or all clients).
+ */
+export function ColumnPicker({ columns, hidden, scope }: { columns: { id: string; header: string }[]; hidden: string[]; scope: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
@@ -41,9 +45,12 @@ export function ColumnPicker({ columns, hidden }: { columns: { id: string; heade
     // Columns of other clients that aren't in this view keep their setting.
     const inView = new Set(columns.map((c) => c.id));
     const others = hidden.filter((id) => !inView.has(id));
-    writeHiddenColumns([...others, ...columns.filter((c) => !shown.has(c.id)).map((c) => c.id)]);
+    const next = [...others, ...columns.filter((c) => !shown.has(c.id)).map((c) => c.id)];
     setOpen(false);
-    startTransition(() => router.refresh());
+    startTransition(async () => {
+      await saveColumnsAction(scope, next);
+      router.refresh();
+    });
   }
 
   const toggle = (id: string) =>

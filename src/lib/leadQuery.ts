@@ -20,6 +20,8 @@ export type LeadQuery = {
   range?: RangeId;
   /** Leave out leads flagged as duplicates (keeps the first lead of each person). */
   hideDuplicates?: boolean;
+  /** Which leads: the working list (default), Archived, or Trash. */
+  view?: LeadView;
   conditions: Condition[];
   sort?: string;
   dir: "asc" | "desc";
@@ -28,6 +30,8 @@ export type LeadQuery = {
 };
 
 type Params = URLSearchParams | Record<string, string | string[] | undefined>;
+
+export type LeadView = "archived" | "trash";
 
 const conditionsSchema = z
   .array(
@@ -59,6 +63,7 @@ export function parseLeadQuery(sp: Params): LeadQuery {
     q: get("q")?.trim().slice(0, 200) || undefined,
     range: RANGES.some((r) => r.id === range) ? (range as RangeId) : undefined,
     hideDuplicates: get("dupes") === "hide" || undefined,
+    view: get("view") === "archived" || get("view") === "trash" ? (get("view") as LeadView) : undefined,
     conditions,
     sort: get("sort"),
     dir: get("dir") === "asc" ? "asc" : "desc",
@@ -68,9 +73,10 @@ export function parseLeadQuery(sp: Params): LeadQuery {
 }
 
 /** URL params for a query, with overrides (undefined removes a key). */
-export function queryToParams(q: LeadQuery, overrides: Partial<Record<"client" | "q" | "range" | "dupes" | "f" | "sort" | "dir" | "page" | "size", string | undefined>> = {}) {
+export function queryToParams(q: LeadQuery, overrides: Partial<Record<"client" | "view" | "q" | "range" | "dupes" | "f" | "sort" | "dir" | "page" | "size", string | undefined>> = {}) {
   const base: Record<string, string | undefined> = {
     client: q.clientId,
+    view: q.view,
     q: q.q,
     range: q.range,
     dupes: q.hideDuplicates ? "hide" : undefined,
@@ -534,6 +540,13 @@ function buildWhere(ctx: Ctx, query: LeadQuery, byId: Map<string, FieldDef>, ski
   }
   if (query.q) where.push(searchSql(query.q));
   if (query.hideDuplicates) where.push(Prisma.sql`NOT l.is_duplicate`);
+  where.push(
+    query.view === "trash"
+      ? Prisma.sql`l.deleted_at IS NOT NULL`
+      : query.view === "archived"
+        ? Prisma.sql`l.deleted_at IS NULL AND l.archived_at IS NOT NULL`
+        : Prisma.sql`l.deleted_at IS NULL AND l.archived_at IS NULL`,
+  );
   for (const c of query.conditions) {
     if (c.field === skipField) continue;
     const def = byId.get(c.field) ?? jsonFieldDef(c.field);

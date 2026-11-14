@@ -45,7 +45,7 @@ export async function rebuildDailyCounts(clientId?: string) {
       INSERT INTO lead_daily_counts (client_id, lp_id, day, leads, duplicates)
       SELECT client_id, COALESCE(lp_id, ''), ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date,
              count(*)::int, (count(*) FILTER (WHERE is_duplicate))::int
-      FROM leads ${only}
+      FROM leads WHERE deleted_at IS NULL ${clientId ? Prisma.sql`AND client_id = ${clientId}` : Prisma.empty}
       GROUP BY 1, 2, 3`,
   ]);
 }

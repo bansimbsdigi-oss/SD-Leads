@@ -9,7 +9,7 @@ import { headers } from "next/headers";
 import { signIn, signOut } from "@/auth";
 import { changeOwnPassword, loginBlockedFor, normaliseEmail, recordLogin, requestPasswordReset, resetPassword } from "@/lib/authSecurity";
 import { prisma } from "@/lib/db";
-import { audit, createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, getLp, updateUser, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
+import { archiveLeads, audit, createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, emptyTrash, getLp, purgeLeads, restoreLeads, updateUser, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
 import { requireCtx } from "@/lib/session";
 import type { Condition } from "@/lib/leadFilterSpec";
 import {
@@ -20,6 +20,7 @@ import {
   setWebhookStatus,
   updateWebhookRule,
 } from "@/lib/outbound/webhooks";
+import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
 import { addNote, assignLeads, bulkTag, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -279,9 +280,10 @@ export async function rotateWebhookAction(fd: FormData) {
 /** Single lead, from the lead page. Goes back to that client's leads. */
 export async function deleteLeadAction(fd: FormData) {
   const ctx = await requireCtx();
-  const { clientIds } = await deleteLeads(ctx, [str(fd, "id")]);
+  const id = str(fd, "id");
+  await deleteLeads(ctx, [id]); // to Trash; the lead page then offers Restore
   revalidatePath("/leads");
-  redirect(clientIds[0] && ctx.role === "SUPER_ADMIN" ? `/leads?client=${clientIds[0]}` : "/leads");
+  revalidatePath(`/leads/${id}`);
 }
 
 /** Bulk delete from the leads table (checkboxes named "ids"). */
@@ -292,9 +294,41 @@ export async function deleteLeadsAction(fd: FormData) {
     const upto = new Date(str(fd, "upto"));
     if (Number.isNaN(upto.getTime())) throw new Error("The list is out of date. Reload the page and try again.");
     await deleteMatchingLeads(ctx, parseLeadQuery(Object.fromEntries(new URLSearchParams(str(fd, "query")))), upto);
+  } else if (fd.get("mode") === "purge") {
+    await purgeLeads(ctx, fd.getAll("ids").map(String).filter(Boolean)); // from Trash: gone for good
   } else {
-    await deleteLeads(ctx, fd.getAll("ids").map(String).filter(Boolean));
+    await deleteLeads(ctx, fd.getAll("ids").map(String).filter(Boolean)); // to Trash
   }
+  revalidatePath("/leads");
+}
+
+export async function restoreLeadsAction(ids: string[]) {
+  return leadAction((ctx) => restoreLeads(ctx, ids), ids.length === 1 ? ids[0] : undefined);
+}
+
+export async function archiveLeadsAction(ids: string[], archive: boolean) {
+  return leadAction((ctx) => archiveLeads(ctx, ids, archive), ids.length === 1 ? ids[0] : undefined);
+}
+
+export async function purgeLeadAction(id: string) {
+  const r = await leadAction((ctx) => purgeLeads(ctx, [id]));
+  if (!r.error) redirect("/leads?view=trash");
+  return r;
+}
+
+export async function emptyTrashAction(clientId: string | null) {
+  return leadAction((ctx) => emptyTrash(ctx, clientId ?? undefined));
+}
+
+export async function saveColumnsAction(scope: string, hidden: string[]) {
+  const ctx = await requireCtx();
+  await saveHiddenColumns(ctx.userId, scope, hidden);
+  revalidatePath("/leads");
+}
+
+export async function hideColumnAction(scope: string, columnId: string) {
+  const ctx = await requireCtx();
+  await hideColumn(ctx.userId, scope, columnId);
   revalidatePath("/leads");
 }
 

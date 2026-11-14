@@ -1,27 +1,81 @@
 "use client";
 
-import { Tag, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, RotateCcw, Tag, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { assignLeadsAction, bulkTagAction, deleteLeadAction, deleteLeadsAction, setLeadStatusAction } from "@/app/actions";
+import {
+  archiveLeadsAction,
+  assignLeadsAction,
+  bulkTagAction,
+  deleteLeadAction,
+  deleteLeadsAction,
+  emptyTrashAction,
+  purgeLeadAction,
+  restoreLeadsAction,
+  setLeadStatusAction,
+} from "@/app/actions";
 import { Button } from "@/components/ui";
 
 const FORM_ID = "bulk-delete";
 const boxes = () => [...document.querySelectorAll<HTMLInputElement>(`input[name="ids"][form="${FORM_ID}"]`)];
 const CHANGED = "lead-selection";
 
-/** Delete button on the lead page. */
-export function DeleteLeadButton({ id, name }: { id: string; name: string }) {
+/** Delete button on the lead page: moves the lead to Trash (restorable). */
+export function DeleteLeadButton({ id }: { id: string }) {
   return (
-    <form
-      action={deleteLeadAction}
-      onSubmit={(e) => {
-        if (!confirm(`Delete ${name || "this lead"}? This cannot be undone.`)) e.preventDefault();
-      }}
-    >
+    <form action={deleteLeadAction}>
       <input type="hidden" name="id" value={id} />
-      <Button type="submit" variant="danger" size="sm">Delete lead</Button>
+      <Button type="submit" variant="danger" size="sm"><Trash2 aria-hidden /> Move to trash</Button>
     </form>
+  );
+}
+
+/** On a lead that's in Trash or Archived: put it back, or (Trash) delete it for good. */
+export function LeadBinActions({ id, state, canDelete }: { id: string; state: "trash" | "archived"; canDelete: boolean }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const go = (act: () => Promise<{ error?: string }>) =>
+    startTransition(async () => {
+      const r = await act();
+      if (r?.error) alert(r.error);
+      router.refresh();
+    });
+  return (
+    <span className="flex flex-wrap gap-2">
+      {state === "trash" ? (
+        <>
+          {canDelete && <Button size="sm" disabled={pending} onClick={() => go(() => restoreLeadsAction([id]))}><RotateCcw aria-hidden /> Restore</Button>}
+          {canDelete && (
+            <Button size="sm" variant="danger" disabled={pending} onClick={() => {
+              if (confirm("Delete this lead for good? It can't be brought back.")) go(() => purgeLeadAction(id));
+            }}>
+              <Trash2 aria-hidden /> Delete forever
+            </Button>
+          )}
+        </>
+      ) : (
+        <Button size="sm" disabled={pending} onClick={() => go(() => archiveLeadsAction([id], false))}><ArchiveRestore aria-hidden /> Unarchive</Button>
+      )}
+    </span>
+  );
+}
+
+/** "Empty trash" on the Trash tab: deletes every lead in it for good. */
+export function EmptyTrashButton({ clientId, count }: { clientId: string | null; count: number }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button size="sm" variant="danger" disabled={pending} onClick={() => {
+      const typed = prompt(`Delete all ${count.toLocaleString("en-IN")} leads in Trash for good? They can't be brought back.\n\nType DELETE to confirm.`);
+      if (typed?.trim().toUpperCase() !== "DELETE") return;
+      startTransition(async () => {
+        const r = await emptyTrashAction(clientId);
+        if (r.error) alert(r.error);
+        router.refresh();
+      });
+    }}>
+      <Trash2 aria-hidden /> {pending ? "Emptying…" : "Empty trash"}
+    </Button>
   );
 }
 
@@ -92,6 +146,8 @@ export function BulkDeleteBar({
   stages,
   owners,
   canDelete,
+  view,
+  canArchive,
 }: {
   total: number;
   capped: boolean;
@@ -100,6 +156,9 @@ export function BulkDeleteBar({
   stages: Option[] | null;
   owners: Option[] | null;
   canDelete: boolean;
+  /** Which list the bar is on: the main list (null), Archived or Trash. */
+  view: "archived" | "trash" | null;
+  canArchive: boolean;
 }) {
   const router = useRouter();
   const { selected, total: onPage } = useSelection();
@@ -140,9 +199,11 @@ export function BulkDeleteBar({
       id={FORM_ID}
       action={deleteLeadsAction}
       onSubmit={(e) => {
-        const ok = all
-          ? prompt(`Delete ALL ${totalLabel} leads matching the current filters, on every page? This cannot be undone.\n\nType DELETE to confirm.`)?.trim().toUpperCase() === "DELETE"
-          : confirm(`Delete ${selected} lead${selected === 1 ? "" : "s"}? This cannot be undone.`);
+        const ok = view === "trash"
+          ? confirm(`Delete ${selected} lead${selected === 1 ? "" : "s"} for good? They can't be brought back.`)
+          : all
+          ? prompt(`Move ALL ${totalLabel} leads matching the current filters, on every page, to Trash? You can restore them from Trash.\n\nType DELETE to confirm.`)?.trim().toUpperCase() === "DELETE"
+          : confirm(`Move ${selected} lead${selected === 1 ? "" : "s"} to Trash? You can restore ${selected === 1 ? "it" : "them"} from Trash.`);
         if (!ok) e.preventDefault();
       }}
       className={selected ? "mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-brand-50 px-3 py-2 text-sm ring-1 ring-brand-200" : note ? "mb-3 block" : "hidden"}
@@ -156,7 +217,18 @@ export function BulkDeleteBar({
         </>
       )}
       {selected > 0 && <span className="font-semibold text-brand-800">{count} selected</span>}
-      {selected > 0 && !all && (
+      {view === "trash" && <input type="hidden" name="mode" value="purge" />}
+      {selected > 0 && view === "trash" && canDelete && (
+        <Button type="button" size="sm" disabled={pending} onClick={() => run("Restored", (ids) => restoreLeadsAction(ids))}>
+          <RotateCcw aria-hidden /> Restore
+        </Button>
+      )}
+      {selected > 0 && view === "archived" && canArchive && (
+        <Button type="button" size="sm" disabled={pending} onClick={() => run("Unarchived", (ids) => archiveLeadsAction(ids, false))}>
+          <ArchiveRestore aria-hidden /> Unarchive
+        </Button>
+      )}
+      {selected > 0 && !all && view === null && (
         <>
           {stages && (
             <select aria-label="Set status" className={select} value="" disabled={pending} onChange={(e) => {
@@ -201,12 +273,17 @@ export function BulkDeleteBar({
               <Tag aria-hidden /> Add tag
             </Button>
           </span>
+          {canArchive && (
+            <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => run("Archived", (ids) => archiveLeadsAction(ids, true))}>
+              <Archive aria-hidden /> Archive
+            </Button>
+          )}
           {!stages && <span className="text-xs text-ink-muted">Pick one client to change status or owner in bulk.</span>}
         </>
       )}
-      {selected > 0 && canDelete && <Button type="submit" variant="danger" size="sm" disabled={pending}><Trash2 aria-hidden /> {all ? `Delete all ${totalLabel}` : "Delete"}</Button>}
+      {selected > 0 && canDelete && <Button type="submit" variant="danger" size="sm" disabled={pending}><Trash2 aria-hidden /> {view === "trash" ? "Delete forever" : all ? `Move all ${totalLabel} to trash` : "Delete"}</Button>}
       {selected > 0 && <button type="button" className="text-ink-muted hover:underline" onClick={clear}>Cancel</button>}
-      {canDelete && pageFull && total > onPage && (
+      {canDelete && view !== "trash" && pageFull && total > onPage && (
         <span className="text-slate-700">
           {all ? `All ${totalLabel} leads matching these filters are selected.` : `All ${onPage} leads on this page are selected.`}{" "}
           <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => setAllPages(!all)}>

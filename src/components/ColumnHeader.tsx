@@ -5,7 +5,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { DateValue } from "@/components/DateValue";
 import { Button } from "@/components/ui";
-import { ALWAYS_SHOWN, readHiddenColumns, writeHiddenColumns } from "@/lib/hiddenColumns";
+import { hideColumnAction } from "@/app/actions";
+import { ALWAYS_SHOWN } from "@/lib/hiddenColumns";
 import { OPS, type Condition, type FieldMeta, type Op } from "@/lib/leadFilterSpec";
 
 type Value = { value: string; label: string; count: number };
@@ -21,6 +22,7 @@ export function ColumnHeader({
   sortDir,
   numeric = false,
   conditions = [],
+  scope = "all",
 }: {
   columnId: string;
   label: string;
@@ -28,6 +30,8 @@ export function ColumnHeader({
   sortDir: "asc" | "desc" | null;
   numeric?: boolean;
   conditions?: Condition[];
+  /** Where "Hide column" is remembered: one client id, or "all". */
+  scope?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -111,9 +115,11 @@ export function ColumnHeader({
   }
 
   function hideColumn() {
-    writeHiddenColumns([...readHiddenColumns(), columnId]);
     close();
-    startTransition(() => router.refresh());
+    startTransition(async () => {
+      await hideColumnAction(scope, columnId);
+      router.refresh();
+    });
   }
 
   const withFilters = (list: Condition[]) => ({ f: list.length ? JSON.stringify(list) : null });

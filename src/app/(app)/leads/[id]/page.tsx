@@ -1,6 +1,6 @@
 import { CheckCircle2, Copy, FileInput, MousePointerClick, Pencil, StickyNote, Tag, UserRound, XCircle } from "lucide-react";
 import Link from "next/link";
-import { DeleteLeadButton } from "@/components/LeadDelete";
+import { DeleteLeadButton, LeadBinActions } from "@/components/LeadDelete";
 import { LeadManage } from "@/components/LeadManage";
 import { Avatar, Badge, Card, PageHeader, Stat, StatusBadge } from "@/components/ui";
 import { getLead, listFields } from "@/lib/data";
@@ -69,8 +69,18 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         icon={<Avatar name={name} size="lg" />}
         title={<span className="flex items-center gap-2">{name} {lead.isDuplicate && <Badge tone="amber">Duplicate</Badge>}</span>}
         subtitle={[lead.phoneNormalised, lead.emailNormalised].filter(Boolean).join(" · ") || "No contact details"}
-        actions={can.deleteLeads(ctx, lead.clientId) && <DeleteLeadButton id={lead.id} name={lead.name ?? ""} />}
+        actions={can.deleteLeads(ctx, lead.clientId) && !lead.deletedAt && <DeleteLeadButton id={lead.id} />}
       />
+      {(lead.deletedAt || lead.archivedAt) && (
+        <div className={`mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm ring-1 ring-inset ${lead.deletedAt ? "bg-red-50 text-red-800 ring-red-200" : "bg-slate-50 text-ink ring-line"}`}>
+          <span>
+            {lead.deletedAt
+              ? `In Trash since ${formatDateTime(lead.deletedAt)}. It doesn't show in lists or dashboards.`
+              : `Archived on ${formatDateTime(lead.archivedAt!)}. It's hidden from the main list but still counted.`}
+          </span>
+          <LeadBinActions id={lead.id} state={lead.deletedAt ? "trash" : "archived"} canDelete={can.deleteLeads(ctx, lead.clientId)} />
+        </div>
+      )}
 
       <Card className="mb-6">
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-5">

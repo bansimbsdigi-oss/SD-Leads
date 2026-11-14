@@ -81,7 +81,7 @@ export async function dashboardCounts(ctx: Ctx, range?: RangeId, pickedClientId?
           count(*) FILTER (WHERE ${keep})::int AS all_time,
           count(*) FILTER (WHERE l.is_duplicate AND ${inRangeLive})::int AS duplicates
         FROM leads l
-        WHERE ${leadScopeSql(ctx)}
+        WHERE ${leadScopeSql(ctx)} AND l.deleted_at IS NULL
         GROUP BY 1`)
     : await prisma.$queryRaw<CountRow[]>(Prisma.sql`
         SELECT ${view.groupBy === "client" ? Prisma.sql`client_id` : Prisma.sql`lp_id`} AS id,
@@ -169,7 +169,7 @@ export async function dashboardTrend(ctx: Ctx, range?: RangeId, pickedClientId?:
   const rows = view.live
     ? await prisma.$queryRaw<{ k: string; n: number }[]>(Prisma.sql`
         SELECT to_char(${istDateOf}, ${fmt}) AS k, count(*)::int AS n
-        FROM leads l WHERE ${leadScopeSql(ctx)} ${keep} AND ${istDateOf} >= ${from}::date GROUP BY 1`)
+        FROM leads l WHERE ${leadScopeSql(ctx)} AND l.deleted_at IS NULL ${keep} AND ${istDateOf} >= ${from}::date GROUP BY 1`)
     : await prisma.$queryRaw<{ k: string; n: number }[]>(Prisma.sql`
         SELECT to_char(day, ${fmt}) AS k, COALESCE(sum(${counted}), 0)::int AS n
         FROM lead_daily_counts WHERE ${view.scope} AND day >= ${from}::date GROUP BY 1`);

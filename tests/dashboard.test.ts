@@ -73,7 +73,7 @@ describe("dashboard counts", () => {
     expect(deleted.reduce((a, b) => a + b, 0)).toBe(2);
     d = await dashboardCounts(admin);
     expect(d.totals.allTime).toBe(2);
-    expect(await prisma.lead.count()).toBe(2);
+    expect(await prisma.lead.count({ where: { deletedAt: null } })).toBe(2); // the other two are in Trash
 
     // Rebuilding from the leads table gives the same numbers.
     await rebuildDailyCounts();

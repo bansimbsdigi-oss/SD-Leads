@@ -72,7 +72,7 @@ export async function requestPasswordReset(rawEmail: string, appUrl: string): Pr
   const token = randomBytes(32).toString("base64url");
   await prisma.$transaction([
     // Only the newest link works. Older ones are expired, not deleted, so they still count towards the hourly limit.
-    prisma.passwordReset.updateMany({ where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } }, data: { expiresAt: new Date() } }),
+    prisma.passwordReset.updateMany({ where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } }, data: { expiresAt: new Date(Date.now() - 1000) } }),
     prisma.passwordReset.create({ data: { userId: user.id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) } }),
   ]);
   const link = `${appUrl.replace(/\/$/, "")}/reset?token=${token}`;

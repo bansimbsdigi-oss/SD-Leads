@@ -91,9 +91,23 @@ model User {
   ownedLeads     Lead[]          @relation("LeadOwner")
   events         LeadEvent[]
   passwordResets PasswordReset[]
+  columnPrefs    ColumnPref[]
 
   @@index([clientId])
   @@map("users")
+}
+
+/// Columns a user hid from the leads table, per view ("all" or a client id).
+model ColumnPref {
+  userId    String   @map("user_id")
+  scope     String
+  hidden    String[] @default([])
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, scope])
+  @@map("column_prefs")
 }
 
 /// Sign-in attempts, for limiting password guessing (per email and per IP).
@@ -230,6 +244,10 @@ model Lead {
   followUpAt      DateTime? @map("follow_up_at")
   /// Labels the team adds by hand ("VIP", "Paid", "No answer"); shown in the tag column.
   tags            String[]  @default([])
+  /// In Trash since then (hidden everywhere, restorable until deleted for good).
+  deletedAt       DateTime? @map("deleted_at")
+  /// Archived since then (hidden from the main list, still counted and searchable under Archived).
+  archivedAt      DateTime? @map("archived_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   lastActivityAt  DateTime  @default(now()) @map("last_activity_at")
@@ -250,6 +268,8 @@ model Lead {
   @@index([clientId, emailNormalised])
   @@index([clientId, statusId])
   @@index([tags], type: Gin)
+  @@index([deletedAt])
+  @@index([archivedAt])
   @@index([clientId, ownerId])
   @@index([duplicateOfId])
   @@index([answers(ops: JsonbPathOps)], type: Gin)

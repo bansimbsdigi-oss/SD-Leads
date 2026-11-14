@@ -1,15 +1,15 @@
-import { Download, Inbox, SearchX } from "lucide-react";
-import { cookies } from "next/headers";
+import { Archive, Download, Inbox, SearchX, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { ColumnHeader } from "@/components/ColumnHeader";
 import { ColumnPicker } from "@/components/ColumnPicker";
-import { BulkDeleteBar, RowCheckbox, SelectAllCheckbox } from "@/components/LeadDelete";
+import { BulkDeleteBar, EmptyTrashButton, RowCheckbox, SelectAllCheckbox } from "@/components/LeadDelete";
 import { LeadInlineSelect } from "@/components/LeadInlineSelect";
 import { LeadToolbar } from "@/components/LeadToolbar";
 import { Pagination } from "@/components/Pagination";
-import { Avatar, Badge, buttonClass, Card, Empty, PageHeader, tableClass } from "@/components/ui";
-import { listClientOptions } from "@/lib/data";
-import { ALWAYS_SHOWN, HIDDEN_COLUMNS_COOKIE, parseHiddenColumns } from "@/lib/hiddenColumns";
+import { Avatar, Badge, buttonClass, Card, cx, Empty, PageHeader, tableClass } from "@/components/ui";
+import { columnScope, getHiddenColumns } from "@/lib/columnPrefs";
+import { leadBinCounts, listClientOptions } from "@/lib/data";
+import { ALWAYS_SHOWN } from "@/lib/hiddenColumns";
 import { leadColumns } from "@/lib/leadColumns";
 import { editOptions } from "@/lib/leadEdit";
 import { DEFAULT_PAGE_SIZE, leadFieldDefs, PAGE_SIZES, parseLeadQuery, queryLeads, queryToParams, toFieldMeta } from "@/lib/leadQuery";
@@ -23,13 +23,17 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
   const query = parseLeadQuery(await searchParams);
   const scope = { clientId: query.clientId };
 
-  const hidden = parseHiddenColumns((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
+  // Column choices are remembered per client (or for "all clients").
+  const colScope = columnScope(query.clientId ?? (isSabhiStaff(ctx) ? null : ctx.clientId));
 
-  const [clients, defs, allColumns] = await Promise.all([
+  const [clients, defs, allColumns, hidden, bins] = await Promise.all([
     isSabhiStaff(ctx) ? listClientOptions(ctx) : Promise.resolve([]),
     leadFieldDefs(ctx, scope),
     leadColumns(ctx, scope),
+    getHiddenColumns(ctx.userId, colScope),
+    leadBinCounts(ctx, query.clientId),
   ]);
+  const view = query.view;
   const { rows: leads, total, totalCapped } = await queryLeads(ctx, query, defs);
   const columns = allColumns.filter((c) => ALWAYS_SHOWN.has(c.id) || !hidden.has(c.id));
   // Status / owner dropdowns: options per client on this page. Bulk changes need one client in view.
@@ -65,13 +69,51 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
         }
         actions={
           <>
-            <ColumnPicker columns={allColumns.map((c) => ({ id: c.id, header: c.header }))} hidden={[...hidden]} />
+            <ColumnPicker columns={allColumns.map((c) => ({ id: c.id, header: c.header }))} hidden={[...hidden]} scope={colScope} />
             <a className={buttonClass("secondary", "sm")} href={`/api/leads/export?${exportParams}`}>
               <Download aria-hidden /> Export CSV
             </a>
           </>
         }
       />
+      <nav aria-label="Lead lists" className="mb-4 flex flex-wrap items-center gap-1 border-b border-line">
+        {[
+          { id: undefined, label: "Leads", icon: <Inbox aria-hidden className="size-4" /> },
+          { id: "archived" as const, label: `Archived${bins.archived ? ` (${bins.archived.toLocaleString("en-IN")})` : ""}`, icon: <Archive aria-hidden className="size-4" /> },
+          { id: "trash" as const, label: `Trash${bins.trash ? ` (${bins.trash.toLocaleString("en-IN")})` : ""}`, icon: <Trash2 aria-hidden className="size-4" /> },
+        ].map((t) => {
+          const p = new URLSearchParams();
+          if (query.clientId) p.set("client", query.clientId);
+          if (t.id) p.set("view", t.id);
+          const active = view === t.id;
+          return (
+            <Link
+              key={t.label}
+              href={p.size ? `/leads?${p}` : "/leads"}
+              aria-current={active ? "page" : undefined}
+              className={cx(
+                "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+                active ? "border-brand-600 text-ink" : "border-transparent text-ink-muted hover:text-ink",
+              )}
+            >
+              {t.icon} {t.label}
+            </Link>
+          );
+        })}
+        {view === "trash" && bins.trash > 0 && deletable && (
+          <span className="ml-auto pb-1.5"><EmptyTrashButton clientId={query.clientId ?? null} count={bins.trash} /></span>
+        )}
+      </nav>
+      {view === "trash" && (
+        <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-inset ring-amber-200">
+          Deleted leads stay here until you restore them or delete them for good. They don&apos;t appear in lists, dashboards or duplicate checks.
+        </p>
+      )}
+      {view === "archived" && (
+        <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-ink-muted ring-1 ring-inset ring-line">
+          Archived leads are hidden from the main list but still count in the dashboard. Tick them to bring them back.
+        </p>
+      )}
       <Card className="mb-4">
         <LeadToolbar clients={clients} fields={fieldMeta} conditions={query.conditions} />
       </Card>
@@ -86,8 +128,12 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
               Try a wider date range or remove a column filter.
             </Empty>
           ) : (
-            <Empty icon={<Inbox />} title="No leads yet">
-              Leads appear here as soon as a landing page form or the client webhook sends one.
+            <Empty icon={view === "trash" ? <Trash2 /> : view === "archived" ? <Archive /> : <Inbox />} title={view === "trash" ? "Trash is empty" : view === "archived" ? "Nothing archived" : "No leads yet"}>
+              {view === "trash"
+                ? "Leads you delete land here first, so they can be restored."
+                : view === "archived"
+                  ? "Tick leads in the main list and choose Archive to tidy it up without deleting anything."
+                  : "Leads appear here as soon as a landing page form or the client webhook sends one."}
             </Empty>
           )
         ) : (
@@ -99,6 +145,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                   stages={bulkClient ? edit.stages[bulkClient] ?? [] : null}
                   owners={bulkClient && edit.canAssign ? edit.owners[bulkClient] ?? [] : null}
                   canDelete={deletable}
+                  view={view ?? null}
+                  canArchive={ctx.role !== "CLIENT_MEMBER"}
                   total={total}
                   capped={totalCapped}
                   query={queryToParams(query, { page: undefined, size: undefined, sort: undefined, dir: undefined }).toString()}
@@ -121,6 +169,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                           sortDir={query.sort === c.id ? query.dir : null}
                           numeric={numeric.has(c.id) || c.id === "created_at"}
                           conditions={query.conditions}
+                          scope={colScope}
                         />
                       </th>
                     ))}

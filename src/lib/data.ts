@@ -35,7 +35,7 @@ export function listClients(ctx: Ctx) {
   return prisma.client.findMany({
     where: clientWhere(ctx),
     orderBy: { name: "asc" },
-    include: { _count: { select: { landingPages: true, leads: true, users: true } } },
+    include: { _count: { select: { landingPages: true, leads: { where: { deletedAt: null } }, users: true } } },
   });
 }
 
@@ -99,7 +99,7 @@ export function listLps(ctx: Ctx, clientId?: string) {
   return prisma.landingPage.findMany({
     where: { AND: [lpWhere(ctx), clientId ? { clientId } : {}] },
     orderBy: { createdAt: "desc" },
-    include: { client: { select: { name: true, slug: true } }, _count: { select: { leads: true, fields: true } } },
+    include: { client: { select: { name: true, slug: true } }, _count: { select: { leads: { where: { deletedAt: null } }, fields: true } } },
   });
 }
 
@@ -299,38 +299,106 @@ export async function getLead(ctx: Ctx, id: string) {
   return lead;
 }
 
-/**
- * Hard-deletes leads (plan §12: deletion on request, with an audit entry). Leads outside the user's
- * scope or permission are skipped. Returns the client ids touched and how many were deleted.
- */
-export async function deleteLeads(ctx: Ctx, ids: string[]) {
+type LeadRef = { id: string; clientId: string; lpId: string | null; createdAt: Date; isDuplicate: boolean };
+
+/** Leads (by id) in this user's scope that `allowed` lets them act on. Throws when none are. */
+async function scopedLeads(ctx: Ctx, ids: string[], extra: Prisma.LeadWhereInput, allowed: (clientId: string) => boolean) {
   const unique = [...new Set(ids)].slice(0, 1000);
-  if (!unique.length) return { deleted: 0, clientIds: [] as string[] };
+  if (!unique.length) return [];
   const leads = await prisma.lead.findMany({
-    where: { AND: [leadWhere(ctx), { id: { in: unique } }] },
+    where: { AND: [leadWhere(ctx), { id: { in: unique } }, extra] },
     select: { id: true, clientId: true, lpId: true, createdAt: true, isDuplicate: true },
   });
-  const allowed = leads.filter((l) => can.deleteLeads(ctx, l.clientId));
-  if (!allowed.length) {
+  const ok = leads.filter((l) => allowed(l.clientId));
+  if (!ok.length) {
     if (leads.length) throw new ForbiddenError();
     throw new NotFoundError("Lead not found");
   }
-  const allowedIds = allowed.map((l) => l.id);
+  return ok;
+}
+
+/**
+ * "Delete": moves leads to Trash. They leave the lists, dashboards and duplicate checks but can be
+ * restored until someone deletes them for good. Leads outside the user's scope or permission are skipped.
+ */
+export async function deleteLeads(ctx: Ctx, ids: string[]) {
+  const leads = await scopedLeads(ctx, ids, { deletedAt: null }, (c) => can.deleteLeads(ctx, c));
+  if (!leads.length) return { deleted: 0, clientIds: [] as string[] };
   const removedCount = await prisma.$transaction(async (tx) => {
+    // RETURNING gives exactly the rows this transaction moved, so a concurrent delete of the same lead
+    // can't make the daily counts drop twice or log it twice.
+    const moved = await tx.$queryRaw<LeadRef[]>`
+      UPDATE leads SET deleted_at = now() WHERE id IN (${Prisma.join(leads.map((l) => l.id))}) AND deleted_at IS NULL
+      RETURNING id, client_id AS "clientId", lp_id AS "lpId", created_at AS "createdAt", is_duplicate AS "isDuplicate"`;
+    await adjustDailyCounts(tx, moved, -1);
+    await tx.auditLog.createMany({ data: moved.map((l) => ({ actorId: ctx.userId, clientId: l.clientId, action: "lead.trash", target: l.id })) });
+    return moved.length;
+  });
+  return { deleted: removedCount, clientIds: [...new Set(leads.map((l) => l.clientId))] };
+}
+
+/** Takes leads out of Trash. */
+export async function restoreLeads(ctx: Ctx, ids: string[]) {
+  const leads = await scopedLeads(ctx, ids, { deletedAt: { not: null } }, (c) => can.deleteLeads(ctx, c));
+  return prisma.$transaction(async (tx) => {
+    const back = await tx.$queryRaw<LeadRef[]>`
+      UPDATE leads SET deleted_at = NULL WHERE id IN (${Prisma.join(leads.map((l) => l.id))}) AND deleted_at IS NOT NULL
+      RETURNING id, client_id AS "clientId", lp_id AS "lpId", created_at AS "createdAt", is_duplicate AS "isDuplicate"`;
+    await adjustDailyCounts(tx, back, 1);
+    await tx.auditLog.createMany({ data: back.map((l) => ({ actorId: ctx.userId, clientId: l.clientId, action: "lead.restore", target: l.id })) });
+    return back.length;
+  });
+}
+
+/** Deletes leads for good. Only leads already in Trash (so nothing goes in one click). */
+export async function purgeLeads(ctx: Ctx, ids: string[]) {
+  const leads = await scopedLeads(ctx, ids, { deletedAt: { not: null } }, (c) => can.deleteLeads(ctx, c));
+  const allowedIds = leads.map((l) => l.id);
+  return prisma.$transaction(async (tx) => {
     // Leads flagged as duplicates of a deleted lead no longer point at it.
     await tx.lead.updateMany({ where: { duplicateOfId: { in: allowedIds } }, data: { duplicateOfId: null } });
-    // RETURNING gives exactly the rows this transaction removed, so a concurrent delete of the
-    // same lead can't make the daily counts drop twice or log it twice.
-    const removed = await tx.$queryRaw<{ id: string; clientId: string; lpId: string | null; createdAt: Date; isDuplicate: boolean }[]>`
-      DELETE FROM leads WHERE id IN (${Prisma.join(allowedIds)})
-      RETURNING id, client_id AS "clientId", lp_id AS "lpId", created_at AS "createdAt", is_duplicate AS "isDuplicate"`;
-    await adjustDailyCounts(tx, removed, -1);
-    await tx.auditLog.createMany({
-      data: removed.map((l) => ({ actorId: ctx.userId, clientId: l.clientId, action: "lead.delete", target: l.id })),
-    });
+    const removed = await tx.$queryRaw<{ id: string; clientId: string }[]>`
+      DELETE FROM leads WHERE id IN (${Prisma.join(allowedIds)}) AND deleted_at IS NOT NULL
+      RETURNING id, client_id AS "clientId"`;
+    await tx.auditLog.createMany({ data: removed.map((l) => ({ actorId: ctx.userId, clientId: l.clientId, action: "lead.delete", target: l.id })) });
     return removed.length;
   });
-  return { deleted: removedCount, clientIds: [...new Set(allowed.map((l) => l.clientId))] };
+}
+
+/** Deletes everything in Trash that this user may delete (one client, or all they can see). */
+export async function emptyTrash(ctx: Ctx, clientId?: string) {
+  let total = 0;
+  for (;;) {
+    const batch = await prisma.lead.findMany({
+      where: { AND: [leadWhere(ctx), { deletedAt: { not: null } }, clientId ? { clientId } : {}] },
+      select: { id: true, clientId: true },
+      take: 1000,
+    });
+    const ids = batch.filter((l) => can.deleteLeads(ctx, l.clientId)).map((l) => l.id);
+    if (!ids.length) break;
+    total += await purgeLeads(ctx, ids);
+    if (batch.length < 1000) break;
+  }
+  return total;
+}
+
+/** Archive (or bring back) leads: hidden from the main list, still counted and searchable under Archived. */
+export async function archiveLeads(ctx: Ctx, ids: string[], archive: boolean) {
+  if (ctx.role === "CLIENT_MEMBER") throw new ForbiddenError();
+  const leads = await scopedLeads(ctx, ids, { deletedAt: null, archivedAt: archive ? null : { not: null } }, () => true);
+  const res = await prisma.lead.updateMany({ where: { id: { in: leads.map((l) => l.id) } }, data: { archivedAt: archive ? new Date() : null } });
+  await prisma.auditLog.createMany({ data: leads.map((l) => ({ actorId: ctx.userId, clientId: l.clientId, action: archive ? "lead.archive" : "lead.unarchive", target: l.id })) });
+  return res.count;
+}
+
+/** Leads in Trash and in Archive, for the tab counts. */
+export async function leadBinCounts(ctx: Ctx, clientId?: string) {
+  const scope: Prisma.LeadWhereInput = { AND: [leadWhere(ctx), clientId ? { clientId } : {}] };
+  const [trash, archived] = await Promise.all([
+    prisma.lead.count({ where: { AND: [scope, { deletedAt: { not: null } }] } }),
+    prisma.lead.count({ where: { AND: [scope, { deletedAt: null, archivedAt: { not: null } }] } }),
+  ]);
+  return { trash, archived };
 }
 
 const DELETE_ALL_MAX = 100_000;

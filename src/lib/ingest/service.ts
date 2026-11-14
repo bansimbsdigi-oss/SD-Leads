@@ -201,7 +201,7 @@ export async function ingestLead(
       ];
       const original = contactMatch.length
         ? await tx.lead.findFirst({
-            where: { clientId: lp.clientId, createdAt: { gte: since }, OR: contactMatch },
+            where: { clientId: lp.clientId, createdAt: { gte: since }, deletedAt: null, OR: contactMatch }, // a lead in Trash isn't an original
             orderBy: { createdAt: "asc" },
             select: { id: true },
           })
