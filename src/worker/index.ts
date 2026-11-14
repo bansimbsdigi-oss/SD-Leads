@@ -3,6 +3,7 @@ import { Worker } from "bullmq";
 import { prisma } from "@/lib/db";
 import { runJob } from "@/lib/jobs";
 import { logger } from "@/lib/logger";
+import { checkQuietLandingPages } from "@/lib/notifications";
 import { QUEUE_NAME, redisConnection, type JobMap } from "@/lib/queue";
 
 const connection = redisConnection();
@@ -20,7 +21,16 @@ const worker = new Worker(
 worker.on("failed", (job, err) => logger.error({ err, job: job?.name, id: job?.id }, "job failed"));
 logger.info("worker started");
 
+// Hourly: landing pages that usually get leads but have had none for a day.
+const quietCheck = () =>
+  checkQuietLandingPages()
+    .then((n) => n && logger.info({ pages: n }, "quiet landing page alerts sent"))
+    .catch((err) => logger.error({ err }, "quiet landing page check failed"));
+setTimeout(quietCheck, 60_000);
+const quietTimer = setInterval(quietCheck, 3_600_000);
+
 const shutdown = async () => {
+  clearInterval(quietTimer);
   await worker.close();
   await prisma.$disconnect();
   process.exit(0);

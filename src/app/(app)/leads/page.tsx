@@ -9,6 +9,7 @@ import { Pagination } from "@/components/Pagination";
 import { Avatar, Badge, buttonClass, Card, cx, Empty, PageHeader, tableClass } from "@/components/ui";
 import { columnScope, getHiddenColumns } from "@/lib/columnPrefs";
 import { leadBinCounts, listClientOptions } from "@/lib/data";
+import { markLeadsSeen } from "@/lib/notifications";
 import { ALWAYS_SHOWN } from "@/lib/hiddenColumns";
 import { leadColumns } from "@/lib/leadColumns";
 import { editOptions } from "@/lib/leadEdit";
@@ -34,6 +35,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
     leadBinCounts(ctx, query.clientId),
   ]);
   const view = query.view;
+  if (!view) await markLeadsSeen(ctx.userId); // clears "new leads" in the bell
   const { rows: leads, total, totalCapped } = await queryLeads(ctx, query, defs);
   const columns = allColumns.filter((c) => ALWAYS_SHOWN.has(c.id) || !hidden.has(c.id));
   // Status / owner dropdowns: options per client on this page. Bulk changes need one client in view.
@@ -42,7 +44,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
   const bulkClient = pageClients.length === 1 ? pageClients[0] : null;
 
   const selectedClient = clients.find((c) => c.id === query.clientId);
-  const filtered = Boolean(query.q || query.range || query.hideDuplicates || query.conditions.length);
+  const filtered = Boolean(query.q || query.range || query.hideDuplicates || query.hideJunk || query.conditions.length);
   const exportParams = queryToParams(query, { page: undefined, size: undefined });
   // Super admins, and client admins for their own client, can delete. Rows of other clients get no checkbox.
   const canDelete = (clientId: string) => can.deleteLeads(ctx, clientId);
@@ -189,6 +191,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                                   <Avatar name={v || "?"} size="sm" />
                                   <Link href={`/leads/${lead.id}`} className="font-medium text-ink hover:text-brand-700 hover:underline">{v || "(no name)"}</Link>
                                   {lead.isDuplicate && <Badge tone="amber">Duplicate</Badge>}
+                                  {lead.junkReasons.length > 0 && (
+                                    <span title={`Looks like junk: ${lead.junkReasons.join(", ")}`}><Badge tone="red">Junk?</Badge></span>
+                                  )}
                                 </span>
                               </td>
                             );

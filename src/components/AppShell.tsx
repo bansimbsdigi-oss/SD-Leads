@@ -4,6 +4,7 @@ import { Building2, Inbox, LayoutDashboard, LogOut, Menu, ScrollText, Users, X }
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { NotificationBell } from "@/components/NotificationBell";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar, cx } from "@/components/ui";
 
@@ -14,11 +15,13 @@ export type NavItem = { href: string; label: string; icon: keyof typeof ICONS; m
 export function AppShell({
   nav,
   user,
+  bell,
   signOut,
   children,
 }: {
   nav: NavItem[];
   user: { name: string; role: string };
+  bell: { unread: number; newLeads: number };
   signOut: () => Promise<void>;
   children: ReactNode;
 }) {
@@ -35,6 +38,9 @@ export function AppShell({
         <span className="min-w-0">
           <span className="block text-[15px] font-semibold leading-tight tracking-tight text-nav-strong">Sabhi Leads</span>
           <span className="block text-[11px] leading-tight text-nav-muted">Lead platform</span>
+        </span>
+        <span className="ml-auto hidden lg:block">
+          <NotificationBell unread={bell.unread} newLeads={bell.newLeads} className="text-nav-muted hover:bg-nav-hover hover:text-nav-strong" />
         </span>
       </div>
       <nav aria-label="Main" className="relative flex-1 space-y-5 overflow-y-auto px-3 py-3">
@@ -97,6 +103,7 @@ export function AppShell({
         </button>
         <span aria-hidden className="flex size-7 items-center justify-center rounded-lg bg-highlight text-xs font-bold text-on-highlight">S</span>
         <span className="flex-1 font-semibold text-ink">Sabhi Leads</span>
+        <NotificationBell unread={bell.unread} newLeads={bell.newLeads} align="right" className="text-ink-muted hover:bg-slate-100 hover:text-ink" />
         <ThemeToggle className="-mr-2 text-ink-muted hover:bg-slate-100 hover:text-ink" />
       </header>
       {open && (

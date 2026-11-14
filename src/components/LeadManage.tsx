@@ -3,7 +3,7 @@
 import { Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
-import { addNoteAction, editLeadAction, setLeadTagsAction, type ActionState } from "@/app/actions";
+import { addNoteAction, clearJunkAction, editLeadAction, setLeadTagsAction, type ActionState } from "@/app/actions";
 import { LeadInlineSelect } from "@/components/LeadInlineSelect";
 import { Button, Field, Input, Label } from "@/components/ui";
 
@@ -32,6 +32,21 @@ export function LeadManage({ lead, stages, owners, suggestions }: { lead: Lead; 
       <EditDetails lead={lead} />
       <NoteForm leadId={lead.id} />
     </div>
+  );
+}
+
+/** "Not junk" on a flagged lead. */
+export function NotJunkButton({ id }: { id: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => startTransition(async () => {
+      const r = await clearJunkAction(id);
+      if (r.error) alert(r.error);
+      router.refresh();
+    })}>
+      It&apos;s a real lead
+    </Button>
   );
 }
 

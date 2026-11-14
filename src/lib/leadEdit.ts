@@ -147,6 +147,17 @@ export async function addNote(ctx: Ctx, id: string, text: string) {
   ]);
 }
 
+/** "Not junk": clears the fake-lead flags someone checked by hand. */
+export async function clearJunk(ctx: Ctx, id: string) {
+  await editableLeads(ctx, [id]);
+  const lead = await prisma.lead.findUniqueOrThrow({ where: { id }, select: { junkReasons: true } });
+  if (!lead.junkReasons.length) return;
+  await prisma.$transaction([
+    prisma.lead.update({ where: { id }, data: { junkReasons: [] } }),
+    prisma.leadEvent.create({ data: { leadId: id, type: "edited", actorId: ctx.userId, payload: { changes: { junk: { from: lead.junkReasons.join(", "), to: "Marked as not junk" } } } } }),
+  ]);
+}
+
 /** Corrects name / phone / email. Phone and email must be valid when given; blank clears them. */
 export async function editLeadDetails(ctx: Ctx, id: string, input: { name: string; phone: string; email: string }) {
   await editableLeads(ctx, [id]);

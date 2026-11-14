@@ -21,7 +21,8 @@ import {
   updateWebhookRule,
 } from "@/lib/outbound/webhooks";
 import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
-import { addNote, assignLeads, bulkTag, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
+import { addNote, assignLeads, bulkTag, clearJunk, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
+import { listNotifications, markAllRead } from "@/lib/notifications";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
 
@@ -318,6 +319,18 @@ export async function purgeLeadAction(id: string) {
 
 export async function emptyTrashAction(clientId: string | null) {
   return leadAction((ctx) => emptyTrash(ctx, clientId ?? undefined));
+}
+
+export async function clearJunkAction(id: string) {
+  return leadAction((ctx) => clearJunk(ctx, id), id);
+}
+
+/** The bell's list; opening it marks everything read. */
+export async function notificationsAction() {
+  const ctx = await requireCtx();
+  const items = await listNotifications(ctx.userId);
+  await markAllRead(ctx.userId);
+  return items.map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, href: n.href, unread: !n.readAt, at: n.createdAt.toISOString() }));
 }
 
 export async function saveColumnsAction(scope: string, hidden: string[]) {

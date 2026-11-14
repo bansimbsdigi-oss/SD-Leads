@@ -5,6 +5,7 @@ import { adjustDailyCounts } from "@/lib/dailyCounts";
 import { enqueue } from "@/lib/queue";
 import { assignFieldKeys, formVersionHash, isPhoneLikeKey, toFieldKey } from "./fieldKeys";
 import { normaliseEmail, normalisePhone } from "./normalise";
+import { junkReasons } from "@/lib/junk";
 import { buildSearchText } from "./searchText";
 import type { IngestField, IngestPayload } from "./schema";
 
@@ -227,6 +228,7 @@ export async function ingestLead(
           scores,
           totalScore,
           searchText: buildSearchText({ name, email, phone, answers }),
+          junkReasons: junkReasons({ name, phone, email }),
           tracking: payload.tracking ?? {},
           consent: payload.consent ?? {},
           source,

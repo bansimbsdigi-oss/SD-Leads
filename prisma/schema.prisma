@@ -83,6 +83,8 @@ model User {
   lastLoginAt  DateTime?    @map("last_login_at")
   /// Sessions issued before this are signed out (password changed or reset).
   passwordChangedAt DateTime? @map("password_changed_at")
+  /// Leads newer than this count as "new" in the notification bell.
+  leadsSeenAt       DateTime? @map("leads_seen_at")
   createdAt    DateTime     @default(now()) @map("created_at")
 
   client         Client?         @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -92,9 +94,28 @@ model User {
   events         LeadEvent[]
   passwordResets PasswordReset[]
   columnPrefs    ColumnPref[]
+  notifications  Notification[]
 
   @@index([clientId])
   @@map("users")
+}
+
+/// In-app notifications (the bell): failed webhooks, quiet landing pages, errors.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  clientId  String?   @map("client_id")
+  type      String
+  title     String
+  body      String?
+  href      String?
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
 }
 
 /// Columns a user hid from the leads table, per view ("all" or a client id).
@@ -174,6 +195,8 @@ model LandingPage {
   sourceUrl          String?  @map("source_url")
   autoCreated        Boolean  @default(false) @map("auto_created")
   createdAt          DateTime @default(now()) @map("created_at")
+  /// When the "no leads for a day" alert last went out (once per quiet spell).
+  quietAlertedAt     DateTime? @map("quiet_alerted_at")
 
   client       Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
   fields       FormField[]
@@ -248,6 +271,8 @@ model Lead {
   deletedAt       DateTime? @map("deleted_at")
   /// Archived since then (hidden from the main list, still counted and searchable under Archived).
   archivedAt      DateTime? @map("archived_at")
+  /// Why the lead looks fake ("Phone looks fake", "Test name"…); empty when it looks real.
+  junkReasons     String[]  @default([]) @map("junk_reasons")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   lastActivityAt  DateTime  @default(now()) @map("last_activity_at")

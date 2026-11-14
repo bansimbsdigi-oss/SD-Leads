@@ -8,6 +8,7 @@ import type { Condition } from "@/lib/leadFilterSpec";
 import { formatAnswer, formatDateTime } from "@/lib/leadColumns";
 import { leadMatchesConditions } from "@/lib/leadQuery";
 import { logger } from "@/lib/logger";
+import { notifyClient } from "@/lib/notifications";
 import { enqueue } from "@/lib/queue";
 import { can, canSeeClient, ForbiddenError, NotFoundError, type Ctx } from "@/lib/tenant";
 import { assertSafeWebhookUrl, webhookUrlProblem } from "./safeUrl";
@@ -210,7 +211,18 @@ export async function deliverLead(integrationId: string, leadId: string, attempt
       durationMs: result.durationMs,
     },
   });
-  if (!result.ok) throw new DeliveryError(result.error ?? "failed");
+  if (!result.ok) {
+    if (attempt >= DELIVERY_ATTEMPTS) {
+      // Out of retries: tell the people responsible, so the lead can be sent by hand.
+      await notifyClient(row.clientId, {
+        type: "webhook_failed",
+        title: `Webhook “${row.name}” failed after ${DELIVERY_ATTEMPTS} tries`,
+        body: `A lead wasn't delivered: ${result.error ?? "no response"}. Open the client to retry it.`,
+        href: `/clients/${row.clientId}`,
+      });
+    }
+    throw new DeliveryError(result.error ?? "failed");
+  }
   return result;
 }
 

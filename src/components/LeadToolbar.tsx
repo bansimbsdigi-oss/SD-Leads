@@ -1,6 +1,6 @@
 "use client";
 
-import { CopyX, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
+import { CopyX, Loader2, Search, ShieldAlert, SlidersHorizontal, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { DateValue } from "@/components/DateValue";
@@ -45,15 +45,16 @@ export function LeadToolbar({ clients, fields, conditions }: Props) {
 
   const fieldById = new Map(fields.map((f) => [f.id, f]));
   const range = params.get("range");
-  const hasFilters = ["q", "range", "dupes", "f", "sort"].some((k) => params.has(k));
+  const hasFilters = ["q", "range", "dupes", "junk", "f", "sort"].some((k) => params.has(k));
   const hideDupes = params.get("dupes") === "hide";
+  const hideJunk = params.get("junk") === "hide";
 
   /** Removes search, date range, advanced conditions and sorting; keeps the selected client. */
   function clearFilters() {
     setQ("");
     setDraft([]);
     setOpen(false);
-    go({ q: null, range: null, dupes: null, f: null, sort: null, dir: null });
+    go({ q: null, range: null, dupes: null, junk: null, f: null, sort: null, dir: null });
   }
 
   function setCondition(i: number, patch: Partial<Condition>) {
@@ -143,6 +144,17 @@ export function LeadToolbar({ clients, fields, conditions }: Props) {
           onClick={() => go({ dupes: hideDupes ? null : "hide" })}
         >
           <CopyX aria-hidden /> {hideDupes ? "Duplicates hidden" : "Hide duplicates"}
+        </Button>
+        <Button
+          type="button"
+          variant={hideJunk ? "primary" : "secondary"}
+          size="sm"
+          className="h-9"
+          aria-pressed={hideJunk}
+          title="Leads that look fake: test names, made-up numbers, throwaway emails."
+          onClick={() => go({ junk: hideJunk ? null : "hide" })}
+        >
+          <ShieldAlert aria-hidden /> {hideJunk ? "Junk hidden" : "Hide junk"}
         </Button>
         {hasFilters && (
           <Button type="button" variant="ghost" size="sm" className="h-9" onClick={clearFilters}>

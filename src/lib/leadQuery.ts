@@ -20,6 +20,8 @@ export type LeadQuery = {
   range?: RangeId;
   /** Leave out leads flagged as duplicates (keeps the first lead of each person). */
   hideDuplicates?: boolean;
+  /** Leave out leads flagged as looking fake. */
+  hideJunk?: boolean;
   /** Which leads: the working list (default), Archived, or Trash. */
   view?: LeadView;
   conditions: Condition[];
@@ -63,6 +65,7 @@ export function parseLeadQuery(sp: Params): LeadQuery {
     q: get("q")?.trim().slice(0, 200) || undefined,
     range: RANGES.some((r) => r.id === range) ? (range as RangeId) : undefined,
     hideDuplicates: get("dupes") === "hide" || undefined,
+    hideJunk: get("junk") === "hide" || undefined,
     view: get("view") === "archived" || get("view") === "trash" ? (get("view") as LeadView) : undefined,
     conditions,
     sort: get("sort"),
@@ -73,13 +76,14 @@ export function parseLeadQuery(sp: Params): LeadQuery {
 }
 
 /** URL params for a query, with overrides (undefined removes a key). */
-export function queryToParams(q: LeadQuery, overrides: Partial<Record<"client" | "view" | "q" | "range" | "dupes" | "f" | "sort" | "dir" | "page" | "size", string | undefined>> = {}) {
+export function queryToParams(q: LeadQuery, overrides: Partial<Record<"client" | "view" | "q" | "range" | "dupes" | "junk" | "f" | "sort" | "dir" | "page" | "size", string | undefined>> = {}) {
   const base: Record<string, string | undefined> = {
     client: q.clientId,
     view: q.view,
     q: q.q,
     range: q.range,
     dupes: q.hideDuplicates ? "hide" : undefined,
+    junk: q.hideJunk ? "hide" : undefined,
     f: q.conditions.length ? JSON.stringify(q.conditions) : undefined,
     sort: q.sort,
     dir: q.sort ? q.dir : undefined,
@@ -369,6 +373,7 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
       return { id: c.id, label: c.header, kind: "text", group: "Lead", expr, sort: Prisma.sql`lower(${expr})` };
     }),
     { id: "duplicate", label: "Duplicate", kind: "bool", group: "Lead", expr: Prisma.sql`l.is_duplicate::text`, num: Prisma.sql`l.is_duplicate`, sort: Prisma.sql`l.is_duplicate` },
+    { id: "junk", label: "Looks like junk", kind: "bool", group: "Lead", expr: Prisma.sql`(cardinality(l.junk_reasons) > 0)::text`, num: Prisma.sql`(cardinality(l.junk_reasons) > 0)`, sort: Prisma.sql`cardinality(l.junk_reasons)` },
     { id: "score", label: "Quiz score", kind: "number", group: "Lead", expr: Prisma.sql`l.total_score::text`, num: Prisma.sql`l.total_score`, sort: Prisma.sql`l.total_score` },
   ];
 
@@ -483,8 +488,8 @@ function conditionSql(def: FieldDef, c: Condition): Prisma.Sql | null {
     case "not_empty": return Prisma.sql`NOT ${empty}`;
     case "gt": return Number.isFinite(num) && def.num ? Prisma.sql`${def.num} > ${num}` : null;
     case "lt": return Number.isFinite(num) && def.num ? Prisma.sql`${def.num} < ${num}` : null;
-    case "true": return Prisma.sql`l.is_duplicate = TRUE`;
-    case "false": return Prisma.sql`l.is_duplicate = FALSE`;
+    case "true": return def.num ? Prisma.sql`(${def.num}) = TRUE` : null;
+    case "false": return def.num ? Prisma.sql`(${def.num}) = FALSE` : null;
   }
   return null; // date ops on a non-date field
 }
@@ -540,6 +545,7 @@ function buildWhere(ctx: Ctx, query: LeadQuery, byId: Map<string, FieldDef>, ski
   }
   if (query.q) where.push(searchSql(query.q));
   if (query.hideDuplicates) where.push(Prisma.sql`NOT l.is_duplicate`);
+  if (query.hideJunk) where.push(Prisma.sql`cardinality(l.junk_reasons) = 0`);
   where.push(
     query.view === "trash"
       ? Prisma.sql`l.deleted_at IS NOT NULL`

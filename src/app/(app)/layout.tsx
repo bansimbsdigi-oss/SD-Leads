@@ -1,5 +1,7 @@
 import { logoutAction } from "@/app/actions";
 import { AppShell, type NavItem } from "@/components/AppShell";
+import { prisma } from "@/lib/db";
+import { newLeadsCount, unreadCount } from "@/lib/notifications";
 import { requireCtx } from "@/lib/session";
 import { isSabhiStaff } from "@/lib/tenant";
 
@@ -25,8 +27,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         ] satisfies NavItem[])
       : []),
   ];
+  const seen = await prisma.user.findUnique({ where: { id: ctx.userId }, select: { leadsSeenAt: true } });
+  const [unread, newLeads] = await Promise.all([unreadCount(ctx.userId), newLeadsCount(ctx, seen?.leadsSeenAt ?? null)]);
   return (
-    <AppShell nav={nav} user={{ name: ctx.name, role: ROLE_LABEL[ctx.role] }} signOut={logoutAction}>
+    <AppShell nav={nav} user={{ name: ctx.name, role: ROLE_LABEL[ctx.role] }} bell={{ unread, newLeads }} signOut={logoutAction}>
       {children}
     </AppShell>
   );

@@ -1,6 +1,7 @@
 import { CheckCircle2, Copy, FileInput, MousePointerClick, Pencil, StickyNote, Tag, UserRound, XCircle } from "lucide-react";
 import Link from "next/link";
 import { DeleteLeadButton, LeadBinActions } from "@/components/LeadDelete";
+import { NotJunkButton } from "@/components/LeadManage";
 import { LeadManage } from "@/components/LeadManage";
 import { Avatar, Badge, Card, PageHeader, Stat, StatusBadge } from "@/components/ui";
 import { getLead, listFields } from "@/lib/data";
@@ -71,6 +72,12 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         subtitle={[lead.phoneNormalised, lead.emailNormalised].filter(Boolean).join(" · ") || "No contact details"}
         actions={can.deleteLeads(ctx, lead.clientId) && !lead.deletedAt && <DeleteLeadButton id={lead.id} />}
       />
+      {lead.junkReasons.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
+          <span><strong className="font-semibold">Looks like junk:</strong> {lead.junkReasons.join(", ")}.</span>
+          <NotJunkButton id={lead.id} />
+        </div>
+      )}
       {(lead.deletedAt || lead.archivedAt) && (
         <div className={`mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm ring-1 ring-inset ${lead.deletedAt ? "bg-red-50 text-red-800 ring-red-200" : "bg-slate-50 text-ink ring-line"}`}>
           <span>
