@@ -60,6 +60,10 @@ model Client {
   /// Secret in the client's single webhook URL: /api/hook/{webhookToken}
   webhookToken String       @unique @map("webhook_token")
   createdAt    DateTime     @default(now()) @map("created_at")
+  /// Client logo (PNG / JPEG / WebP, small), shown on their pages and their login link.
+  logo          Bytes?
+  logoType      String?   @map("logo_type")
+  logoUpdatedAt DateTime? @map("logo_updated_at")
 
   users          User[]
   landingPages   LandingPage[]
@@ -219,6 +223,8 @@ model FormField {
   options      Json?
   role         FieldRole?
   isHidden     Boolean    @default(false) @map("is_hidden")
+  /// Shown in another column (field manager "merge"): that column's key.
+  mergeInto    String?    @map("merge_into")
   position     Int        @default(0)
   firstSeenAt  DateTime   @default(now()) @map("first_seen_at")
   lastSeenAt   DateTime   @default(now()) @map("last_seen_at")

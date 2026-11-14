@@ -1,6 +1,8 @@
-import { ArrowRight, CircleCheck, FileText, Inbox, RefreshCw, UserPlus, Users, Webhook } from "lucide-react";
+import { ArrowRight, CircleCheck, FileText, ImageIcon, Inbox, ListTree, RefreshCw, UserPlus, Users, Webhook } from "lucide-react";
 import Link from "next/link";
-import { rotateWebhookAction } from "@/app/actions";
+import { removeLogoAction, rotateWebhookAction, saveLogoAction } from "@/app/actions";
+import { ActionForm } from "@/components/ActionForm";
+import { ClientLogo } from "@/components/ClientLogo";
 import { CopyBox } from "@/components/CopyBox";
 import { DeleteClientDialog } from "@/components/DeleteClientDialog";
 import { EditLpDialog } from "@/components/EditLpDialog";
@@ -8,6 +10,7 @@ import { Avatar, Badge, Button, buttonClass, Card, Empty, PageHeader, StatTile, 
 import { EditUserDialog } from "@/components/EditUserDialog";
 import { UserForm } from "@/components/UserForm";
 import { WebhooksCard } from "@/components/WebhooksCard";
+import { logoUrl } from "@/lib/branding";
 import { getClient, listLps, listUsers } from "@/lib/data";
 import { leadFieldDefs, toFieldMeta } from "@/lib/leadQuery";
 import { listWebhookRules } from "@/lib/outbound/webhooks";
@@ -41,7 +44,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
     <>
       <PageHeader
         crumbs={isSabhiStaff(ctx) ? [{ label: "Clients", href: "/clients" }, { label: client.name }] : undefined}
-        icon={<Avatar name={client.name} size="lg" />}
+        icon={<ClientLogo name={client.name} logo={logoUrl(client)} size="lg" />}
         title={client.name}
         subtitle={<code className="font-mono text-xs">{client.slug}</code>}
         actions={
@@ -91,7 +94,16 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             </Card>
           )}
 
-          <Card flush title="Landing pages" description={`${lps.length} page${lps.length === 1 ? "" : "s"}`}>
+          <Card
+            flush
+            title="Landing pages"
+            description={`${lps.length} page${lps.length === 1 ? "" : "s"}`}
+            actions={can.editFields(ctx, client.id) && lps.length > 0 && (
+              <Link href={`/clients/${client.id}/fields`} className={buttonClass("secondary", "sm")}>
+                <ListTree aria-hidden /> Manage fields
+              </Link>
+            )}
+          >
             {lps.length === 0 ? (
               <Empty icon={<FileText />} title="No landing pages yet">
                 Send a lead to the client webhook above and its landing page appears here automatically.
@@ -194,6 +206,30 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         </div>
 
         <div className="space-y-6">
+          {canManageLps && (
+            <Card title={<span className="flex items-center gap-2"><ImageIcon aria-hidden className="size-4 text-brand-700" /> Branding</span>} description="Shown on this client's pages and their login link.">
+              <div className="mb-4 flex items-center gap-3">
+                <ClientLogo name={client.name} logo={logoUrl(client)} size="lg" />
+                <p className="text-xs text-ink-muted">{client.logoUpdatedAt ? "Current logo." : "No logo yet: initials are shown."} PNG, JPEG or WebP, up to 300 KB. Square works best.</p>
+              </div>
+              <ActionForm action={saveLogoAction} className="space-y-3" resetOnSuccess>
+                <input type="hidden" name="clientId" value={client.id} />
+                <input type="file" name="logo" accept="image/png,image/jpeg,image/webp" required aria-label="Logo image" className="block w-full text-sm text-ink-muted file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-ink hover:file:bg-slate-200" />
+                <Button type="submit" size="sm" className="w-full">Upload logo</Button>
+              </ActionForm>
+              {client.logoUpdatedAt && (
+                <form action={removeLogoAction} className="mt-2">
+                  <input type="hidden" name="clientId" value={client.id} />
+                  <Button type="submit" variant="ghost" size="sm" className="w-full">Remove logo</Button>
+                </form>
+              )}
+              <div className="mt-5">
+                <p className="mb-1.5 text-xs font-medium text-ink-muted">Client login link</p>
+                <CopyBox value={`${(process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/login?c=${client.slug}`} />
+                <p className="mt-1.5 text-xs text-ink-muted">Share it with the client&apos;s team: the sign-in page shows their logo and name.</p>
+              </div>
+            </Card>
+          )}
           {canManageUsers && (
             <Card title={<span className="flex items-center gap-2"><UserPlus aria-hidden className="size-4 text-brand-700" /> Add user</span>}>
               <UserForm

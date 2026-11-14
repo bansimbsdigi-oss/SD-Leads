@@ -1,6 +1,8 @@
 import { CircleCheck, Inbox, Filter, Webhook } from "lucide-react";
 import { redirect } from "next/navigation";
+import { ClientLogo } from "@/components/ClientLogo";
 import { LoginForm } from "@/components/LoginForm";
+import { brandBySlug } from "@/lib/branding";
 import { getCtx } from "@/lib/session";
 
 const POINTS = [
@@ -20,6 +22,8 @@ export default async function LoginPage({ searchParams }: { searchParams: SP }) 
   if (await getCtx()) redirect("/");
   const sp = await searchParams;
   const notice = Object.keys(NOTICES).find((k) => sp[k]);
+  // A client's own login link (/login?c=<slug>) shows their name and logo.
+  const brand = typeof sp.c === "string" ? await brandBySlug(sp.c) : null;
   return (
     <main className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(480px,42%)]">
       <section className="relative hidden overflow-hidden border-r border-nav-line bg-nav p-12 text-nav-strong lg:flex lg:flex-col lg:justify-between">
@@ -49,6 +53,15 @@ export default async function LoginPage({ searchParams }: { searchParams: SP }) 
             <span className="text-lg font-semibold">Sabhi Leads</span>
           </div>
           <div className="rounded-2xl border border-line bg-surface p-6 shadow-[0_1px_3px_rgba(15,23,42,0.06),0_8px_24px_rgba(15,23,42,0.06)] sm:p-8">
+            {brand && (
+              <div className="mb-5 flex items-center gap-3 border-b border-line pb-5">
+                <ClientLogo name={brand.name} logo={brand.logo} size="lg" />
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{brand.name}</p>
+                  <p className="text-xs text-ink-muted">Lead dashboard by Sabhi Digital</p>
+                </div>
+              </div>
+            )}
             <h2 className="text-2xl font-semibold tracking-tight">Welcome back</h2>
             <p className="mb-7 mt-1.5 text-sm text-ink-muted">Sign in with the email your Sabhi account manager set up for you.</p>
             {notice && (

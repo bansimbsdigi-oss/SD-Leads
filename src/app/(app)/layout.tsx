@@ -1,5 +1,6 @@
 import { logoutAction } from "@/app/actions";
 import { AppShell, type NavItem } from "@/components/AppShell";
+import { logoUrl } from "@/lib/branding";
 import { prisma } from "@/lib/db";
 import { newLeadsCount, unreadCount } from "@/lib/notifications";
 import { requireCtx } from "@/lib/session";
@@ -28,9 +29,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       : []),
   ];
   const seen = await prisma.user.findUnique({ where: { id: ctx.userId }, select: { leadsSeenAt: true } });
-  const [unread, newLeads] = await Promise.all([unreadCount(ctx.userId), newLeadsCount(ctx, seen?.leadsSeenAt ?? null)]);
+  const [unread, newLeads, own] = await Promise.all([
+    unreadCount(ctx.userId),
+    newLeadsCount(ctx, seen?.leadsSeenAt ?? null),
+    // A client's own users see their client's name and logo in the sidebar.
+    ctx.clientId ? prisma.client.findUnique({ where: { id: ctx.clientId }, select: { name: true, slug: true, logoUpdatedAt: true } }) : null,
+  ]);
   return (
-    <AppShell nav={nav} user={{ name: ctx.name, role: ROLE_LABEL[ctx.role] }} bell={{ unread, newLeads }} signOut={logoutAction}>
+    <AppShell nav={nav} user={{ name: ctx.name, role: ROLE_LABEL[ctx.role] }} bell={{ unread, newLeads }} brand={own ? { name: own.name, logo: logoUrl(own) } : null} signOut={logoutAction}>
       {children}
     </AppShell>
   );

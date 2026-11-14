@@ -20,7 +20,9 @@ import {
   setWebhookStatus,
   updateWebhookRule,
 } from "@/lib/outbound/webhooks";
+import { removeLogo, saveLogo } from "@/lib/branding";
 import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
+import { mergeColumn, renameColumn, setColumnHidden, unmergeField } from "@/lib/fieldManager";
 import { addNote, assignLeads, bulkTag, clearJunk, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
 import { listNotifications, markAllRead } from "@/lib/notifications";
 import { parseLeadQuery } from "@/lib/leadQuery";
@@ -331,6 +333,58 @@ export async function notificationsAction() {
   const items = await listNotifications(ctx.userId);
   await markAllRead(ctx.userId);
   return items.map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, href: n.href, unread: !n.readAt, at: n.createdAt.toISOString() }));
+}
+
+// ---------- Client branding ----------
+
+export async function saveLogoAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  const clientId = str(fd, "clientId");
+  try {
+    const file = fd.get("logo");
+    if (!(file instanceof File)) return { error: "Choose an image first." };
+    await saveLogo(ctx, clientId, file);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/", "layout");
+  return { ok: "Logo saved." };
+}
+
+export async function removeLogoAction(fd: FormData) {
+  const ctx = await requireCtx();
+  await removeLogo(ctx, str(fd, "clientId"));
+  revalidatePath("/", "layout");
+}
+
+// ---------- Field manager ----------
+
+async function fieldAction(clientId: string, run: (ctx: Awaited<ReturnType<typeof requireCtx>>) => Promise<unknown>): Promise<ActionState> {
+  const ctx = await requireCtx();
+  try {
+    await run(ctx);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath(`/clients/${clientId}/fields`);
+  revalidatePath("/leads");
+  return { ok: "Saved." };
+}
+
+export async function renameColumnAction(clientId: string, key: string, label: string) {
+  return fieldAction(clientId, (ctx) => renameColumn(ctx, clientId, key, label));
+}
+
+export async function hideColumnFieldsAction(clientId: string, key: string, hidden: boolean) {
+  return fieldAction(clientId, (ctx) => setColumnHidden(ctx, clientId, key, hidden));
+}
+
+export async function mergeColumnAction(clientId: string, from: string, into: string) {
+  return fieldAction(clientId, (ctx) => mergeColumn(ctx, clientId, from, into));
+}
+
+export async function unmergeFieldAction(clientId: string, fieldId: string) {
+  return fieldAction(clientId, (ctx) => unmergeField(ctx, fieldId));
 }
 
 export async function saveColumnsAction(scope: string, hidden: string[]) {

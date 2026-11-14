@@ -160,7 +160,7 @@ const CORE_KEYS = new Set(["name", "phone", "email"]);
  * "phone_2"; such a copy joins the column its label names ("Ref", "UTM_Placement", "WhatsApp No.").
  * Numbered questions (q_1, q_2 with their own labels) stay separate.
  */
-function groupKey(fieldKey: string, label: string): string {
+export function groupKey(fieldKey: string, label: string): string {
   const key = canonicalFieldKey(fieldKey);
   const copy = /^(.+)_\d+$/.exec(fieldKey);
   if (!copy) return key;
@@ -192,7 +192,8 @@ export async function formFieldGroups(ctx: Ctx, scope: { clientId?: string; lpId
   const byKey = new Map<string, AnswerField & { lastSeen: number }>();
   const absorbed: Absorbed = {};
   for (const f of fields) {
-    const key = groupKey(f.fieldKey, f.label);
+    // A field merged by hand (field manager) joins the column it was merged into.
+    const key = f.mergeInto || groupKey(f.fieldKey, f.label);
     const std = standardKeyOf(key);
     if (std) {
       absorb(absorbed, std, f.fieldKey); // shown in its fixed column, whatever role it was given

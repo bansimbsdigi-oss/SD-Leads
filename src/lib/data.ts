@@ -35,6 +35,7 @@ export function listClients(ctx: Ctx) {
   return prisma.client.findMany({
     where: clientWhere(ctx),
     orderBy: { name: "asc" },
+    omit: { logo: true },
     include: { _count: { select: { landingPages: true, leads: { where: { deletedAt: null } }, users: true } } },
   });
 }
@@ -45,7 +46,7 @@ export function listClientOptions(ctx: Ctx) {
 }
 
 export async function getClient(ctx: Ctx, id: string) {
-  const client = await prisma.client.findFirst({ where: { AND: [clientWhere(ctx), { id }] } });
+  const client = await prisma.client.findFirst({ where: { AND: [clientWhere(ctx), { id }] }, omit: { logo: true } });
   if (!client) throw new NotFoundError("Client not found");
   return client;
 }

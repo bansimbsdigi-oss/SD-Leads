@@ -1,9 +1,11 @@
+import { ClientLogo } from "@/components/ClientLogo";
+import { logoUrl } from "@/lib/branding";
 import { Building2, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClientAction } from "@/app/actions";
 import { ActionForm } from "@/components/ActionForm";
-import { Avatar, Badge, Button, Card, Empty, Hint, Input, Label, PageHeader, tableClass } from "@/components/ui";
+import { Badge, Button, Card, Empty, Hint, Input, Label, PageHeader, tableClass } from "@/components/ui";
 import { listClients } from "@/lib/data";
 import { requireCtx } from "@/lib/session";
 import { can, isSabhiStaff } from "@/lib/tenant";
@@ -32,7 +34,7 @@ export default async function ClientsPage() {
                     <tr key={c.id} className="group">
                       <td>
                         <Link href={`/clients/${c.id}`} className="flex items-center gap-3">
-                          <Avatar name={c.name} />
+                          <ClientLogo name={c.name} logo={logoUrl(c)} />
                           <span className="min-w-0">
                             <span className="block font-medium text-ink group-hover:text-brand-700">{c.name}</span>
                             <span className="block font-mono text-xs text-ink-muted">{c.slug}</span>

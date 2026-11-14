@@ -4,7 +4,9 @@ import { Building2, Inbox, LayoutDashboard, LogOut, Menu, ScrollText, Users, X }
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { ClientLogo } from "@/components/ClientLogo";
 import { NotificationBell } from "@/components/NotificationBell";
+import { QuickSearch, SearchButton } from "@/components/QuickSearch";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar, cx } from "@/components/ui";
 
@@ -16,12 +18,15 @@ export function AppShell({
   nav,
   user,
   bell,
+  brand,
   signOut,
   children,
 }: {
   nav: NavItem[];
   user: { name: string; role: string };
   bell: { unread: number; newLeads: number };
+  /** The client, for a client's own users: their name and logo replace the Sabhi mark. */
+  brand: { name: string; logo: string | null } | null;
   signOut: () => Promise<void>;
   children: ReactNode;
 }) {
@@ -34,14 +39,21 @@ export function AppShell({
   const sidebar = (
     <div className="flex h-full flex-col border-r border-nav-line bg-nav text-nav-ink">
       <div className="relative flex h-16 items-center gap-3 px-5">
-        <span aria-hidden className="flex size-8 items-center justify-center rounded-lg bg-highlight text-sm font-bold text-on-highlight">S</span>
+        {brand ? (
+          <ClientLogo name={brand.name} logo={brand.logo} size="md" />
+        ) : (
+          <span aria-hidden className="flex size-8 items-center justify-center rounded-lg bg-highlight text-sm font-bold text-on-highlight">S</span>
+        )}
         <span className="min-w-0">
-          <span className="block text-[15px] font-semibold leading-tight tracking-tight text-nav-strong">Sabhi Leads</span>
-          <span className="block text-[11px] leading-tight text-nav-muted">Lead platform</span>
+          <span className="block truncate text-[15px] font-semibold leading-tight tracking-tight text-nav-strong">{brand?.name ?? "Sabhi Leads"}</span>
+          <span className="block text-[11px] leading-tight text-nav-muted">{brand ? "Leads by Sabhi" : "Lead platform"}</span>
         </span>
         <span className="ml-auto hidden lg:block">
           <NotificationBell unread={bell.unread} newLeads={bell.newLeads} className="text-nav-muted hover:bg-nav-hover hover:text-nav-strong" />
         </span>
+      </div>
+      <div className="px-3 pb-1">
+        <SearchButton className="border-nav-line text-nav-muted hover:bg-nav-hover hover:text-nav-strong" />
       </div>
       <nav aria-label="Main" className="relative flex-1 space-y-5 overflow-y-auto px-3 py-3">
         {sections.map((s) => (
@@ -103,6 +115,7 @@ export function AppShell({
         </button>
         <span aria-hidden className="flex size-7 items-center justify-center rounded-lg bg-highlight text-xs font-bold text-on-highlight">S</span>
         <span className="flex-1 font-semibold text-ink">Sabhi Leads</span>
+        <SearchButton compact className="text-ink-muted hover:bg-slate-100 hover:text-ink" />
         <NotificationBell unread={bell.unread} newLeads={bell.newLeads} align="right" className="text-ink-muted hover:bg-slate-100 hover:text-ink" />
         <ThemeToggle className="-mr-2 text-ink-muted hover:bg-slate-100 hover:text-ink" />
       </header>
@@ -118,6 +131,7 @@ export function AppShell({
         </div>
       )}
 
+      <QuickSearch pages={nav.map((n) => ({ href: n.href, label: n.label }))} />
       <main className="lg:pl-60">
         <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
       </main>
