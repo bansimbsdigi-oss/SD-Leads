@@ -224,7 +224,13 @@ export async function updateUser(ctx: Ctx, id: string, input: UserUpdate) {
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id },
-        data: { name: input.name.trim(), email: input.email.trim().toLowerCase(), role: input.role, status: input.status, ...(passwordHash ? { passwordHash } : {}) },
+        data: {
+          name: input.name.trim(),
+          email: input.email.trim().toLowerCase(),
+          role: input.role,
+          status: input.status,
+          ...(passwordHash ? { passwordHash, passwordChangedAt: new Date() } : {}), // a new password signs them out
+        },
       });
       if (!user.clientId) {
         await tx.clientManager.deleteMany({ where: { userId: id } });

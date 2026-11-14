@@ -1,4 +1,4 @@
-import { Inbox, Filter, Webhook } from "lucide-react";
+import { CircleCheck, Inbox, Filter, Webhook } from "lucide-react";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/LoginForm";
 import { getCtx } from "@/lib/session";
@@ -9,8 +9,17 @@ const POINTS = [
   { icon: Filter, text: "Sheet-style filters, search and export" },
 ];
 
-export default async function LoginPage() {
+type SP = Promise<Record<string, string | string[] | undefined>>;
+
+const NOTICES: Record<string, string> = {
+  changed: "Password changed. Sign in with your new password.",
+  reset: "New password saved. Sign in with it now.",
+};
+
+export default async function LoginPage({ searchParams }: { searchParams: SP }) {
   if (await getCtx()) redirect("/");
+  const sp = await searchParams;
+  const notice = Object.keys(NOTICES).find((k) => sp[k]);
   return (
     <main className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(480px,42%)]">
       <section className="relative hidden overflow-hidden border-r border-nav-line bg-nav p-12 text-nav-strong lg:flex lg:flex-col lg:justify-between">
@@ -42,9 +51,15 @@ export default async function LoginPage() {
           <div className="rounded-2xl border border-line bg-surface p-6 shadow-[0_1px_3px_rgba(15,23,42,0.06),0_8px_24px_rgba(15,23,42,0.06)] sm:p-8">
             <h2 className="text-2xl font-semibold tracking-tight">Welcome back</h2>
             <p className="mb-7 mt-1.5 text-sm text-ink-muted">Sign in with the email your Sabhi account manager set up for you.</p>
+            {notice && (
+              <p role="status" className="-mt-2 mb-5 flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800 ring-1 ring-inset ring-emerald-200">
+                <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
+                {NOTICES[notice]}
+              </p>
+            )}
             <LoginForm />
           </div>
-          <p className="mt-6 text-center text-xs text-ink-muted">Trouble signing in? Ask your Sabhi account manager to reset your password.</p>
+          <p className="mt-6 text-center text-xs text-ink-muted">Still stuck? Ask your Sabhi account manager to reset your password.</p>
         </div>
       </section>
     </main>

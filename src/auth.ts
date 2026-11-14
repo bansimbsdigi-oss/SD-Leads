@@ -6,6 +6,13 @@ import { verifyPassword } from "@/lib/password";
 
 const credentialsSchema = z.object({ email: z.string().email(), password: z.string().min(1).max(200) });
 
+declare module "next-auth" {
+  interface Session {
+    /** When the session was issued (ms); sessions older than the user's last password change are refused. */
+    issuedAt?: number;
+  }
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt", maxAge: 60 * 60 * 12 },
   pages: { signIn: "/login" },
@@ -26,11 +33,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     jwt({ token, user }) {
-      if (user?.id) token.uid = user.id;
+      if (user?.id) {
+        token.uid = user.id;
+        token.issuedAt = Date.now();
+      }
       return token;
     },
     session({ session, token }) {
       if (token.uid) session.user.id = token.uid as string;
+      session.issuedAt = typeof token.issuedAt === "number" ? token.issuedAt : 0;
       return session;
     },
   },

@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
+import Link from "next/link";
 import { useActionState, useState } from "react";
 import { loginAction, type ActionState } from "@/app/actions";
 
@@ -35,7 +36,10 @@ export function LoginForm() {
       </div>
 
       <div>
-        <label htmlFor="password" className="mb-2 block text-sm font-medium text-ink">Password</label>
+        <div className="mb-2 flex items-center justify-between">
+          <label htmlFor="password" className="block text-sm font-medium text-ink">Password</label>
+          <Link href="/forgot" className="text-sm font-medium text-brand-700 hover:underline">Forgot password?</Link>
+        </div>
         <div className="relative">
           <Lock aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-slate-400" />
           <input

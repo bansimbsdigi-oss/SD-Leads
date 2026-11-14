@@ -14,6 +14,8 @@ export const getCtx = cache(async (): Promise<(Ctx & { name: string; email: stri
     include: { managedClients: { select: { clientId: true } }, lpAccess: { select: { lpId: true } } },
   });
   if (!user || user.status !== "active") return null;
+  // Password changed or reset since this session was issued: sign it out.
+  if (user.passwordChangedAt && (session.issuedAt ?? 0) < user.passwordChangedAt.getTime()) return null;
   return {
     userId: user.id,
     role: user.role,

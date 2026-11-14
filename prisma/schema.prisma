@@ -79,6 +79,8 @@ model User {
   role         Role
   status       ActiveStatus @default(active)
   lastLoginAt  DateTime?    @map("last_login_at")
+  /// Sessions issued before this are signed out (password changed or reset).
+  passwordChangedAt DateTime? @map("password_changed_at")
   createdAt    DateTime     @default(now()) @map("created_at")
 
   client         Client?         @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -86,9 +88,38 @@ model User {
   managedClients ClientManager[]
   ownedLeads     Lead[]          @relation("LeadOwner")
   events         LeadEvent[]
+  passwordResets PasswordReset[]
 
   @@index([clientId])
   @@map("users")
+}
+
+/// Sign-in attempts, for limiting password guessing (per email and per IP).
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+  @@map("login_attempts")
+}
+
+/// One-time "forgot password" links. Only a hash of the token is stored.
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_resets")
 }
 
 // Account managers (Sabhi staff) are assigned to specific clients.

@@ -67,11 +67,13 @@ export function AppShell({
       </nav>
       <div className="relative border-t border-nav-line p-3">
         <div className="flex items-center gap-2 rounded-lg px-2 py-2">
-          <Avatar name={user.name} size="sm" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-nav-strong">{user.name}</p>
-            <p className="truncate text-xs text-nav-muted">{user.role}</p>
-          </div>
+          <Link href="/account" title="Your account and password" className="-m-1 flex min-w-0 flex-1 items-center gap-3 rounded-md p-1 transition-colors hover:bg-nav-hover">
+            <Avatar name={user.name} size="sm" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-nav-strong">{user.name}</span>
+              <span className="block truncate text-xs text-nav-muted">{user.role}</span>
+            </span>
+          </Link>
           <ThemeToggle className="text-nav-muted hover:bg-nav-hover hover:text-nav-strong" />
           <form action={signOut}>
             <button aria-label="Sign out" title="Sign out" className="rounded-md p-2 text-nav-muted transition-colors hover:bg-nav-hover hover:text-nav-strong">

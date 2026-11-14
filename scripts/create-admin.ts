@@ -15,7 +15,7 @@ async function main() {
   const passwordHash = await hashPassword(password);
   await prisma.user.upsert({
     where: { email },
-    update: { passwordHash, role: "SUPER_ADMIN", status: "active", clientId: null },
+    update: { passwordHash, passwordChangedAt: new Date(), role: "SUPER_ADMIN", status: "active", clientId: null },
     create: { email, name, role: "SUPER_ADMIN", clientId: null, passwordHash },
   });
   await prisma.auditLog.create({ data: { action: "user.create", target: email } });

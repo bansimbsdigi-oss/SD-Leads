@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { Prisma, type Role } from "@prisma/client";
+import { headers } from "next/headers";
 import { signIn, signOut } from "@/auth";
+import { changeOwnPassword, loginBlockedFor, normaliseEmail, recordLogin, requestPasswordReset, resetPassword } from "@/lib/authSecurity";
 import { prisma } from "@/lib/db";
 import { audit, createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, getLp, updateUser, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
 import { requireCtx } from "@/lib/session";
@@ -34,13 +36,57 @@ function errorMessage(err: unknown): string {
 
 const str = (fd: FormData, key: string) => String(fd.get(key) ?? "").trim();
 
+/** The visitor's IP (the reverse proxy puts it first in x-forwarded-for). */
+async function clientIp() {
+  const h = await headers();
+  return (h.get("x-forwarded-for")?.split(",")[0] || h.get("x-real-ip") || "unknown").trim().slice(0, 64);
+}
+
 export async function loginAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const email = normaliseEmail(str(fd, "email")).slice(0, 200);
+  const ip = await clientIp();
+  const wait = await loginBlockedFor(email, ip);
+  if (wait) return { error: `Too many wrong attempts. Try again in ${wait} minute${wait === 1 ? "" : "s"}, or reset your password.` };
   try {
-    await signIn("credentials", { email: str(fd, "email"), password: String(fd.get("password") ?? ""), redirectTo: "/" });
+    await signIn("credentials", { email, password: String(fd.get("password") ?? ""), redirectTo: "/" });
   } catch (err) {
-    if (err instanceof AuthError) return { error: "Wrong email or password." };
+    if (err instanceof AuthError) {
+      await recordLogin(email, ip, false);
+      return { error: "Wrong email or password." };
+    }
+    await recordLogin(email, ip, true);
     throw err; // NEXT_REDIRECT on success
   }
+}
+
+export async function changePasswordAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  try {
+    await changeOwnPassword(ctx.userId, String(fd.get("current") ?? ""), String(fd.get("password") ?? ""), String(fd.get("confirm") ?? ""));
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  // Every session (this one too) was signed out by the change.
+  redirect("/login?changed=1");
+}
+
+export async function requestResetAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const email = str(fd, "email");
+  if (!z.string().email().safeParse(email).success) return { error: "Enter the email you sign in with." };
+  // Same per-IP limit as sign-in, so the form can't be used to spam inboxes.
+  const ip = await clientIp();
+  if (await loginBlockedFor(normaliseEmail(email), ip)) return { error: "Too many attempts. Try again in a few minutes." };
+  await requestPasswordReset(email, process.env.APP_URL || "http://localhost:3000");
+  return { ok: "If that email has a Sabhi Leads login, a reset link is on its way. It works for 1 hour." };
+}
+
+export async function resetPasswordAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    await resetPassword(str(fd, "token"), String(fd.get("password") ?? ""), String(fd.get("confirm") ?? ""));
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  redirect("/login?reset=1");
 }
 
 export async function logoutAction() {
