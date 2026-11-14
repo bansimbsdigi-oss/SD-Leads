@@ -2,6 +2,7 @@ import { logoutAction } from "@/app/actions";
 import { AppShell, type NavItem } from "@/components/AppShell";
 import { logoUrl } from "@/lib/branding";
 import { prisma } from "@/lib/db";
+import { openErrorCount } from "@/lib/errors";
 import { newLeadsCount, unreadCount } from "@/lib/notifications";
 import { requireCtx } from "@/lib/session";
 import { isSabhiStaff } from "@/lib/tenant";
@@ -12,6 +13,11 @@ const ROLE_LABEL = {
   CLIENT_ADMIN: "Client admin",
   CLIENT_MEMBER: "Member",
 } as const;
+
+async function errorsLabel() {
+  const open = await openErrorCount();
+  return open ? `Errors (${open > 99 ? "99+" : open})` : "Errors";
+}
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireCtx();
@@ -25,6 +31,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       ? ([
           { href: "/users", label: "Sabhi team", icon: "team", match: ["/users"], section: "Admin" },
           { href: "/audit", label: "Audit log", icon: "audit", match: ["/audit"], section: "Admin" },
+          { href: "/errors", label: await errorsLabel(), icon: "errors", match: ["/errors"], section: "Admin" },
         ] satisfies NavItem[])
       : []),
   ];

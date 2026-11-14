@@ -10,7 +10,7 @@ import { signIn, signOut } from "@/auth";
 import { changeOwnPassword, loginBlockedFor, normaliseEmail, recordLogin, requestPasswordReset, resetPassword } from "@/lib/authSecurity";
 import { prisma } from "@/lib/db";
 import { archiveLeads, audit, createClient, createLp, createUser, deleteClient, deleteLeads, deleteMatchingLeads, emptyTrash, getLp, purgeLeads, restoreLeads, updateUser, parseDomains, rotateWebhookToken, updateLp } from "@/lib/data";
-import { requireCtx } from "@/lib/session";
+import { getCtx, requireCtx } from "@/lib/session";
 import type { Condition } from "@/lib/leadFilterSpec";
 import {
   createWebhookRule,
@@ -24,6 +24,7 @@ import { removeLogo, saveLogo } from "@/lib/branding";
 import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
 import { mergeColumn, renameColumn, setColumnHidden, unmergeField } from "@/lib/fieldManager";
 import { addNote, assignLeads, bulkTag, clearJunk, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
+import { recordError, setErrorResolved } from "@/lib/errors";
 import { listNotifications, markAllRead } from "@/lib/notifications";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -333,6 +334,24 @@ export async function notificationsAction() {
   const items = await listNotifications(ctx.userId);
   await markAllRead(ctx.userId);
   return items.map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, href: n.href, unread: !n.readAt, at: n.createdAt.toISOString() }));
+}
+
+// ---------- Errors ----------
+
+/** From the error screen in the browser (signed-in users only, so it can't be used to spam the log). */
+export async function reportBrowserErrorAction(message: string, path: string) {
+  const ctx = await getCtx();
+  if (!ctx) return;
+  const err = new Error(String(message).slice(0, 1000));
+  err.stack = undefined;
+  await recordError(err, { source: "browser", path: String(path).slice(0, 300), context: { userId: ctx.userId } });
+}
+
+export async function resolveErrorAction(id: string, resolved: boolean) {
+  const ctx = await requireCtx();
+  if (ctx.role !== "SUPER_ADMIN") throw new ForbiddenError();
+  await setErrorResolved(id, resolved);
+  revalidatePath("/errors");
 }
 
 // ---------- Client branding ----------

@@ -226,7 +226,9 @@ export async function deliverLead(integrationId: string, leadId: string, attempt
   return result;
 }
 
-export class DeliveryError extends Error {}
+export class DeliveryError extends Error {
+  name = "DeliveryError";
+}
 
 export const DELIVERY_ATTEMPTS = 5;
 

@@ -104,6 +104,24 @@ model User {
   @@map("users")
 }
 
+/// Errors seen by the app (server, background jobs, browsers), grouped by fingerprint.
+model ErrorLog {
+  id          String    @id @default(cuid())
+  fingerprint String    @unique
+  source      String
+  message     String
+  stack       String?
+  path        String?
+  context     Json      @default("{}")
+  count       Int       @default(1)
+  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  @@index([lastSeenAt])
+  @@map("error_logs")
+}
+
 /// In-app notifications (the bell): failed webhooks, quiet landing pages, errors.
 model Notification {
   id        String    @id @default(cuid())

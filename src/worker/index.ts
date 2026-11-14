@@ -3,6 +3,7 @@ import { Worker } from "bullmq";
 import { prisma } from "@/lib/db";
 import { runJob } from "@/lib/jobs";
 import { logger } from "@/lib/logger";
+import { recordError } from "@/lib/errors";
 import { checkQuietLandingPages } from "@/lib/notifications";
 import { QUEUE_NAME, redisConnection, type JobMap } from "@/lib/queue";
 
@@ -18,7 +19,13 @@ const worker = new Worker(
   { connection, concurrency: 5 },
 );
 
-worker.on("failed", (job, err) => logger.error({ err, job: job?.name, id: job?.id }, "job failed"));
+worker.on("failed", (job, err) => {
+  logger.error({ err, job: job?.name, id: job?.id }, "job failed");
+  // Out of retries: into the error log. Webhook deliveries are left out (they alert on their own and a
+  // client's endpoint being down isn't an app error).
+  const lastTry = (job?.attemptsMade ?? 0) >= (job?.opts.attempts ?? 1);
+  if (lastTry && err.name !== "DeliveryError") void recordError(err, { source: "job", path: job?.name, context: { jobId: job?.id } });
+});
 logger.info("worker started");
 
 // Hourly: landing pages that usually get leads but have had none for a day.

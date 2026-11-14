@@ -110,3 +110,34 @@ describe("notification bell", () => {
     }
   });
 });
+
+describe("error tracking", () => {
+  beforeEach(resetDb);
+
+  it("groups repeats, alerts super admins once, and again only if a fixed error comes back", async () => {
+    const { listErrors, openErrorCount, recordError, setErrorResolved } = await import("@/lib/errors");
+    const { unreadCount, markAllRead } = await import("@/lib/notifications");
+    await prisma.errorLog.deleteMany();
+    const sa = await makeUser("SUPER_ADMIN", null);
+    const { client } = await makeClient("alpha");
+    const clientAdmin = await makeUser("CLIENT_ADMIN", client.id);
+
+    // Same error with different ids in the message: one group.
+    await recordError(new Error("Lead cmabc12345678901234567890 not found"), { source: "server", path: "/leads/x?y=1" });
+    await recordError(new Error("Lead cmzzz98765432109876543210 not found"), { source: "server", path: "/leads/x" });
+    const [e] = await listErrors("open");
+    expect([e.count, e.path, await openErrorCount()]).toEqual([2, "/leads/x", 1]);
+    expect(await unreadCount(sa.userId)).toBe(1);
+    expect(await unreadCount(clientAdmin.userId)).toBe(0); // app errors are for super admins
+
+    await markAllRead(sa.userId);
+    await setErrorResolved(e.id, true);
+    expect(await openErrorCount()).toBe(0);
+    await recordError(new Error("Lead cm00000000000000000000000 not found"), { source: "server", path: "/leads/x" });
+    expect(await openErrorCount()).toBe(1); // came back
+    expect(await unreadCount(sa.userId)).toBe(1);
+
+    await recordError("something odd", { source: "browser", path: "/dashboard" }); // non-Error values are fine too
+    expect(await openErrorCount()).toBe(2);
+  });
+});

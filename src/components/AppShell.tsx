@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Inbox, LayoutDashboard, LogOut, Menu, ScrollText, Users, X } from "lucide-react";
+import { Building2, Inbox, LayoutDashboard, LogOut, Menu, ScrollText, TriangleAlert, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -10,7 +10,7 @@ import { QuickSearch, SearchButton } from "@/components/QuickSearch";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar, cx } from "@/components/ui";
 
-const ICONS = { dashboard: LayoutDashboard, leads: Inbox, clients: Building2, team: Users, audit: ScrollText } as const;
+const ICONS = { dashboard: LayoutDashboard, leads: Inbox, clients: Building2, team: Users, audit: ScrollText, errors: TriangleAlert } as const;
 
 export type NavItem = { href: string; label: string; icon: keyof typeof ICONS; match: string[]; section: "Workspace" | "Admin" };
 
