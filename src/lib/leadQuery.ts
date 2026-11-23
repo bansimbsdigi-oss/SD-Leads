@@ -374,6 +374,13 @@ export async function leadFieldDefs(ctx: Ctx, scope: { clientId?: string; lpId?:
       return { id: c.id, label: c.header, kind: "text", group: "Lead", expr, sort: Prisma.sql`lower(${expr})` };
     }),
     { id: "duplicate", label: "Duplicate", kind: "bool", group: "Lead", expr: Prisma.sql`l.is_duplicate::text`, num: Prisma.sql`l.is_duplicate`, sort: Prisma.sql`l.is_duplicate` },
+    {
+      id: "lookup_type", label: "Lead type", kind: "choice", group: "Lead", exact: true,
+      options: [{ value: "mentor", label: "Mentor's lead" }, { value: "sub_mentor", label: "Sub-mentor's lead" }, { value: "none", label: "None of the above" }],
+      expr: Prisma.sql`l.lookup_type`, sort: Prisma.sql`l.lookup_type`,
+    },
+    { id: "mentor_name", label: "Mentor", kind: "text", group: "Lead", expr: Prisma.sql`l.mentor_name`, sort: Prisma.sql`lower(l.mentor_name)` },
+    { id: "sub_mentor_name", label: "Sub-mentor", kind: "text", group: "Lead", expr: Prisma.sql`l.sub_mentor_name`, sort: Prisma.sql`lower(l.sub_mentor_name)` },
     { id: "junk", label: "Looks like junk", kind: "bool", group: "Lead", expr: Prisma.sql`(cardinality(l.junk_reasons) > 0)::text`, num: Prisma.sql`(cardinality(l.junk_reasons) > 0)`, sort: Prisma.sql`cardinality(l.junk_reasons)` },
     { id: "score", label: "Quiz score", kind: "number", group: "Lead", expr: Prisma.sql`l.total_score::text`, num: Prisma.sql`l.total_score`, sort: Prisma.sql`l.total_score` },
   ];

@@ -25,6 +25,7 @@ import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
 import { mergeColumn, renameColumn, setColumnHidden, unmergeField } from "@/lib/fieldManager";
 import { addNote, assignLeads, bulkTag, clearJunk, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
 import { recordError, setErrorResolved } from "@/lib/errors";
+import { checkByHand, checkExistingLeads, reloadSheets, resendLookup, rotateLookupToken, saveLookupConfig } from "@/lib/lookup";
 import { listNotifications, markAllRead } from "@/lib/notifications";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -334,6 +335,74 @@ export async function notificationsAction() {
   const items = await listNotifications(ctx.userId);
   await markAllRead(ctx.userId);
   return items.map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, href: n.href, unread: !n.readAt, at: n.createdAt.toISOString() }));
+}
+
+// ---------- Lead lookup ----------
+
+const lookupPath = (clientId: string) => `/clients/${clientId}/lookup`;
+
+export async function saveLookupConfigAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  const clientId = str(fd, "clientId");
+  try {
+    await saveLookupConfig(ctx, clientId, {
+      mentorSheetUrl: str(fd, "mentorSheetUrl"),
+      subMentorSheetUrl: str(fd, "subMentorSheetUrl"),
+      webhookId: str(fd, "webhookId"),
+      refreshMinutes: Number(str(fd, "refreshMinutes")) || 2,
+      enabled: fd.get("enabled") === "on",
+    });
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath(lookupPath(clientId));
+  return { ok: "Saved. Both sheets were read again." };
+}
+
+export async function reloadSheetsAction(clientId: string) {
+  const ctx = await requireCtx();
+  await reloadSheets(ctx, clientId);
+  revalidatePath(lookupPath(clientId));
+}
+
+export async function rotateLookupTokenAction(clientId: string) {
+  const ctx = await requireCtx();
+  await rotateLookupToken(ctx, clientId);
+  revalidatePath(lookupPath(clientId));
+}
+
+export async function checkLeadByHandAction(clientId: string, input: { name: string; email: string; phone: string }, send: boolean) {
+  const ctx = await requireCtx();
+  try {
+    const { payload } = await checkByHand(ctx, clientId, input, send);
+    revalidatePath(lookupPath(clientId));
+    return { ok: true as const, payload };
+  } catch (err) {
+    return { ok: false as const, error: errorMessage(err) };
+  }
+}
+
+export async function resendLookupAction(clientId: string, lookupId: string) {
+  const ctx = await requireCtx();
+  try {
+    await resendLookup(ctx, lookupId);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath(lookupPath(clientId));
+  return {};
+}
+
+export async function checkExistingLeadsAction(clientId: string) {
+  const ctx = await requireCtx();
+  try {
+    const count = await checkExistingLeads(ctx, clientId);
+    revalidatePath(lookupPath(clientId));
+    revalidatePath("/leads");
+    return { count };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 // ---------- Errors ----------

@@ -72,6 +72,8 @@ model Client {
   integrations   Integration[]
   managers       ClientManager[]
   dailyCounts    LeadDailyCount[]
+  lookupConfig   LookupConfig?
+  lookups        LeadLookup[]
 
   @@map("clients")
 }
@@ -102,6 +104,56 @@ model User {
 
   @@index([clientId])
   @@map("users")
+}
+
+/// Lead lookup settings per client: the Mentor and Sub-mentor Google Sheets and the last good copy of each.
+model LookupConfig {
+  clientId          String    @id @map("client_id")
+  enabled           Boolean   @default(true)
+  mentorSheetUrl    String?   @map("mentor_sheet_url")
+  subMentorSheetUrl String?   @map("sub_mentor_sheet_url")
+  refreshMinutes    Int       @default(2) @map("refresh_minutes")
+  /// Secret in the lookup API URL: /api/lookup/{apiToken}
+  apiToken          String    @unique @map("api_token")
+  /// Webhook (Integration) that API and hand-checked lookups are sent to, event = lead_lookup.
+  webhookId         String?   @map("webhook_id")
+  /// Parsed rows of each sheet, kept so a Google outage doesn't stop lookups.
+  mentorRows        Json?     @map("mentor_rows")
+  subMentorRows     Json?     @map("sub_mentor_rows")
+  mentorReadAt      DateTime? @map("mentor_read_at")
+  subMentorReadAt   DateTime? @map("sub_mentor_read_at")
+  mentorError       String?   @map("mentor_error")
+  subMentorError    String?   @map("sub_mentor_error")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("lookup_configs")
+}
+
+/// Every lead lookup: automatic (new lead), from the API (Pabbly) or checked by hand.
+model LeadLookup {
+  id            String   @id @default(cuid())
+  clientId      String   @map("client_id")
+  leadId        String?  @map("lead_id")
+  name          String?
+  email         String?
+  phone         String?
+  leadType      String   @map("lead_type")
+  mentorName    String?  @map("mentor_name")
+  subMentorName String?  @map("sub_mentor_name")
+  matchedBy     String?  @map("matched_by")
+  source        String
+  /// sent | failed | not_sent | off | with_lead (went out in the lead's own webhook)
+  webhookStatus String   @map("webhook_status")
+  webhookError  String?  @map("webhook_error")
+  payload       Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
+  @@map("lead_lookups")
 }
 
 /// Errors seen by the app (server, background jobs, browsers), grouped by fingerprint.
@@ -297,6 +349,12 @@ model Lead {
   archivedAt      DateTime? @map("archived_at")
   /// Why the lead looks fake ("Phone looks fake", "Test name"…); empty when it looks real.
   junkReasons     String[]  @default([]) @map("junk_reasons")
+  /// Lead lookup against the client's Mentor / Sub-mentor sheets: mentor | sub_mentor | none (null = not checked).
+  lookupType      String?   @map("lookup_type")
+  mentorName      String?   @map("mentor_name")
+  subMentorName   String?   @map("sub_mentor_name")
+  lookupMatchedBy String?   @map("lookup_matched_by")
+  lookupAt        DateTime? @map("lookup_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   lastActivityAt  DateTime  @default(now()) @map("last_activity_at")

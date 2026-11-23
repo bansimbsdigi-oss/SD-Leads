@@ -9,6 +9,7 @@ export const QUEUE_NAME = "sabhi-jobs";
 export type JobMap = {
   "lead.created": { leadId: string };
   "webhook.deliver": { integrationId: string; leadId: string };
+  "lookup.deliver": { lookupId: string };
 };
 
 /** `jobId` makes the queue ignore a second copy of the same job (e.g. a retried fan-out). */
