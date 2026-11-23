@@ -213,12 +213,6 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                             );
                           case "source":
                             return <td key={c.id}><Badge>{v}</Badge></td>;
-                          case "lookup_type":
-                            return (
-                              <td key={c.id} className="whitespace-nowrap">
-                                {lead.lookupType ? <Badge tone={lead.lookupType === "mentor" ? "green" : lead.lookupType === "sub_mentor" ? "violet" : "slate"}>{v}</Badge> : <Dash />}
-                              </td>
-                            );
                           case "created_at":
                             return <td key={c.id} className="whitespace-nowrap text-xs text-ink-muted">{v}</td>;
                           case "phone":

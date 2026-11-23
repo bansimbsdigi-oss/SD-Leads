@@ -1,4 +1,4 @@
-import { ArrowRight, CircleCheck, FileText, ImageIcon, Inbox, ListTree, RefreshCw, UserPlus, UserSearch, Users, Webhook } from "lucide-react";
+import { ArrowRight, CircleCheck, FileText, ImageIcon, Inbox, ListTree, RefreshCw, UserPlus, Users, Webhook } from "lucide-react";
 import Link from "next/link";
 import { removeLogoAction, rotateWebhookAction, saveLogoAction } from "@/app/actions";
 import { ActionForm } from "@/components/ActionForm";
@@ -99,16 +99,11 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             title="Landing pages"
             description={`${lps.length} page${lps.length === 1 ? "" : "s"}`}
             actions={can.editFields(ctx, client.id) && (
-              <span className="flex flex-wrap gap-2">
-                <Link href={`/clients/${client.id}/lookup`} className={buttonClass("secondary", "sm")}>
-                  <UserSearch aria-hidden /> Lead lookup
+              lps.length > 0 && (
+                <Link href={`/clients/${client.id}/fields`} className={buttonClass("secondary", "sm")}>
+                  <ListTree aria-hidden /> Manage fields
                 </Link>
-                {lps.length > 0 && (
-                  <Link href={`/clients/${client.id}/fields`} className={buttonClass("secondary", "sm")}>
-                    <ListTree aria-hidden /> Manage fields
-                  </Link>
-                )}
-              </span>
+              )
             )}
           >
             {lps.length === 0 ? (

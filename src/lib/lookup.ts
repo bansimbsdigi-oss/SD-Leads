@@ -1,15 +1,15 @@
-// Lead lookup: is a lead in the client's Mentor sheet, Sub-mentor sheet, or neither? The two Google Sheets
-// stay in Google and are read live (at most every few minutes; the last good copy is kept for outages).
-// New leads are checked as they arrive and the result rides along in their webhook; Pabbly can also call
-// the lookup API for leads that never come through SD-Leads.
+// Lead lookup: is a lead in the Mentor sheet, the Sub-mentor sheet, or neither? One global setup: leads are
+// sent to a secret inbound webhook, checked against the two Google Sheets (read live, at most every few
+// minutes; the last good copy is kept for outages), and the result is sent on to the outbound webhook.
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { newWebhookToken } from "@/lib/crypto";
+import { decryptJson, encryptJson, newWebhookToken } from "@/lib/crypto";
 import { logger } from "@/lib/logger";
 import { LEAD_TYPE_LABEL, type LeadType } from "@/lib/lookupLabels";
-import { postJson, webhookTarget } from "@/lib/outbound/webhooks";
+import { webhookUrlProblem } from "@/lib/outbound/safeUrl";
+import { postJson } from "@/lib/outbound/webhooks";
 import { enqueue } from "@/lib/queue";
-import { can, canSeeClient, ForbiddenError, NotFoundError, type Ctx } from "@/lib/tenant";
+import { ForbiddenError, NotFoundError, type Ctx } from "@/lib/tenant";
 
 export type Sheet = "mentor" | "subMentor";
 export type SheetRow = { email: string | null; phone: string | null; name: string; mentor: string | null };
@@ -123,12 +123,23 @@ async function downloadSheet(url: string): Promise<string> {
 
 // ---------- Settings and the cached copies ----------
 
+const GLOBAL = "global";
 const FIELDS = {
   mentor: { url: "mentorSheetUrl", rows: "mentorRows", readAt: "mentorReadAt", error: "mentorError" },
   subMentor: { url: "subMentorSheetUrl", rows: "subMentorRows", readAt: "subMentorReadAt", error: "subMentorError" },
 } as const;
 
 type Config = NonNullable<Awaited<ReturnType<typeof prisma.lookupConfig.findUnique>>>;
+
+/** The one lookup setup, created on first use (with its secret inbound webhook token). */
+async function config(): Promise<Config> {
+  return (
+    (await prisma.lookupConfig.findUnique({ where: { id: GLOBAL } })) ??
+    prisma.lookupConfig.upsert({ where: { id: GLOBAL }, update: {}, create: { id: GLOBAL, apiToken: newWebhookToken() } })
+  );
+}
+
+const outboundUrl = (cfg: Config) => (cfg.outboundConfig ? decryptJson<{ url: string }>(cfg.outboundConfig).url : null);
 
 /** Re-reads a sheet when its copy is older than the refresh time (or `force`). Keeps the last good copy on failure. */
 async function freshRows(cfg: Config, sheet: Sheet, force = false): Promise<{ rows: SheetRow[]; error: string | null; readAt: Date | null }> {
@@ -141,12 +152,12 @@ async function freshRows(cfg: Config, sheet: Sheet, force = false): Promise<{ ro
   try {
     const rows = readSheetRows(await downloadSheet(url), sheet);
     const readAt = new Date();
-    await prisma.lookupConfig.update({ where: { clientId: cfg.clientId }, data: { [f.rows]: rows, [f.readAt]: readAt, [f.error]: null } });
+    await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [f.rows]: rows, [f.readAt]: readAt, [f.error]: null } });
     return { rows, error: null, readAt };
   } catch (err) {
     const error = err instanceof Error ? err.message.slice(0, 300) : "Couldn't read the sheet.";
-    await prisma.lookupConfig.update({ where: { clientId: cfg.clientId }, data: { [f.error]: error } });
-    logger.warn({ clientId: cfg.clientId, sheet, error }, "lookup sheet read failed; using last good copy");
+    await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [f.error]: error } });
+    logger.warn({ sheet, error }, "lookup sheet read failed; using last good copy");
     return { rows: cached, error, readAt: cfg[f.readAt] };
   }
 }
@@ -170,13 +181,8 @@ export function matchLead(mentorRows: SheetRow[], subRows: SheetRow[], lead: { e
   return { leadType: "none", mentorName: null, subMentorName: null, matchedBy: null };
 }
 
-async function lookupFor(cfg: Config, lead: { email?: unknown; phone?: unknown }) {
-  const [m, s] = await Promise.all([freshRows(cfg, "mentor"), freshRows(cfg, "subMentor")]);
-  return matchLead(m.rows, s.rows, lead);
-}
-
-/** The payload Pabbly receives: the same fields for every result, so they're mapped once. */
-export function lookupPayload(r: LookupResult, lead: { name?: string | null; email?: string | null; phone?: string | null }, source: "lead" | "api" | "panel", at = new Date()) {
+/** The payload sent on: the same fields for every result, so they're mapped once in Pabbly. */
+export function lookupPayload(r: LookupResult, lead: { name?: string | null; email?: string | null; phone?: string | null }, source: "webhook" | "panel", at = new Date()) {
   return {
     event: "lead_lookup",
     event_name: "Lead Lookup",
@@ -196,38 +202,9 @@ export function lookupPayload(r: LookupResult, lead: { name?: string | null; ema
   };
 }
 
-const configured = (cfg: Config | null): cfg is Config => Boolean(cfg?.enabled && (cfg.mentorSheetUrl || cfg.subMentorSheetUrl));
+const ready = (cfg: Config) => cfg.enabled && Boolean(cfg.mentorSheetUrl || cfg.subMentorSheetUrl);
 
-// ---------- New leads (automatic) ----------
-
-/** Checks a new lead and saves the result on it, before its webhooks go out. Never throws. */
-export async function lookupNewLead(leadId: string) {
-  try {
-    const lead = await prisma.lead.findUnique({ where: { id: leadId }, select: { id: true, clientId: true, name: true, emailNormalised: true, phoneNormalised: true } });
-    if (!lead || (!lead.emailNormalised && !lead.phoneNormalised)) return null;
-    const cfg = await prisma.lookupConfig.findUnique({ where: { clientId: lead.clientId } });
-    if (!configured(cfg)) return null;
-    const r = await lookupFor(cfg, { email: lead.emailNormalised, phone: lead.phoneNormalised });
-    await saveOnLead(lead.id, r);
-    await prisma.leadLookup.create({
-      data: {
-        clientId: lead.clientId, leadId: lead.id, name: lead.name, email: lead.emailNormalised, phone: lead.phoneNormalised,
-        leadType: r.leadType, mentorName: r.mentorName, subMentorName: r.subMentorName, matchedBy: r.matchedBy,
-        source: "lead", webhookStatus: "with_lead",
-        payload: lookupPayload(r, { name: lead.name, email: lead.emailNormalised, phone: lead.phoneNormalised }, "lead"),
-      },
-    });
-    return r;
-  } catch (err) {
-    logger.error({ err, leadId }, "lead lookup failed");
-    return null;
-  }
-}
-
-const saveOnLead = (id: string, r: LookupResult) =>
-  prisma.lead.update({ where: { id }, data: { lookupType: r.leadType, mentorName: r.mentorName, subMentorName: r.subMentorName, lookupMatchedBy: r.matchedBy, lookupAt: new Date() } });
-
-// ---------- API (Pabbly) and checks by hand ----------
+// ---------- Inbound webhook and checks by hand ----------
 
 export class LookupInputError extends Error {}
 
@@ -247,142 +224,124 @@ export function lookupInput(body: Record<string, unknown>) {
   return { name: name.slice(0, 200) || null, email: email.slice(0, 200) || null, phone: phone.slice(0, 40) || null };
 }
 
-/** Looks up a lead, saves it and (when `send`) queues it to the client's lookup webhook. */
-export async function lookupAndLog(clientId: string, input: { name: string | null; email: string | null; phone: string | null }, source: "api" | "panel", send: boolean) {
-  const cfg = await prisma.lookupConfig.findUnique({ where: { clientId } });
-  if (!configured(cfg)) throw new Error("Lead lookup isn't set up for this client yet: add the sheet links first.");
-  const r = await lookupFor(cfg, input);
+/** The inbound webhook's secret token, or null when it isn't this one. */
+export async function lookupTokenMatches(token: string) {
+  if (!/^[a-f0-9]{32,64}$/.test(token)) return false;
+  return Boolean(await prisma.lookupConfig.findUnique({ where: { apiToken: token }, select: { id: true } }));
+}
+
+/** Looks up a lead, saves it and (when `send` and an outbound webhook is set) queues it to be sent. */
+export async function lookupAndLog(input: { name: string | null; email: string | null; phone: string | null }, source: "webhook" | "panel", send: boolean) {
+  const cfg = await config();
+  if (!ready(cfg)) throw new Error(cfg.enabled ? "Lead lookup isn't set up yet: add the sheet links first." : "Lead lookup is switched off.");
+  const [m, s] = await Promise.all([freshRows(cfg, "mentor"), freshRows(cfg, "subMentor")]);
+  const r = matchLead(m.rows, s.rows, input);
   const payload = lookupPayload(r, input, source);
-  const willSend = send && Boolean(cfg.webhookId);
+  const hasOut = Boolean(cfg.outboundConfig);
   const row = await prisma.leadLookup.create({
     data: {
-      clientId, name: input.name, email: input.email, phone: input.phone, leadType: r.leadType, mentorName: r.mentorName,
+      name: input.name, email: input.email, phone: input.phone, leadType: r.leadType, mentorName: r.mentorName,
       subMentorName: r.subMentorName, matchedBy: r.matchedBy, source, payload,
-      webhookStatus: !send ? "not_sent" : cfg.webhookId ? "not_sent" : "off",
+      webhookStatus: send && hasOut ? "not_sent" : send ? "off" : "not_sent",
     },
   });
-  if (willSend) await enqueue("lookup.deliver", { lookupId: row.id }, { attempts: 3, backoffMs: 20_000, jobId: `lookup-${row.id}` });
+  if (send && hasOut) await enqueue("lookup.deliver", { lookupId: row.id }, { attempts: 3, backoffMs: 20_000, jobId: `lookup-${row.id}` });
   return { result: r, payload, lookupId: row.id };
 }
 
-/** Sends one saved lookup to the client's lookup webhook. Throws on failure so the queue retries. */
+/** Sends one saved lookup to the outbound webhook. Throws on failure so the queue retries. */
 export async function deliverLookup(lookupId: string) {
   const row = await prisma.leadLookup.findUnique({ where: { id: lookupId } });
   if (!row) return;
-  const cfg = await prisma.lookupConfig.findUnique({ where: { clientId: row.clientId } });
-  const target = cfg?.webhookId ? await webhookTarget(cfg.webhookId, row.clientId) : null;
-  if (!target) {
-    await prisma.leadLookup.update({ where: { id: lookupId }, data: { webhookStatus: "off", webhookError: "No lookup webhook chosen" } });
+  const url = outboundUrl(await config());
+  if (!url) {
+    await prisma.leadLookup.update({ where: { id: lookupId }, data: { webhookStatus: "off", webhookError: "No outbound webhook set" } });
     return;
   }
-  const res = await postJson(target.url, row.payload);
+  const res = await postJson(url, row.payload);
   await prisma.leadLookup.update({ where: { id: lookupId }, data: { webhookStatus: res.ok ? "sent" : "failed", webhookError: res.error } });
   if (!res.ok) throw new Error(`Lookup webhook failed: ${res.error}`);
 }
 
-// ---------- Settings page ----------
+// ---------- Lead lookup page (super admins) ----------
 
-function assertView(ctx: Ctx, clientId: string) {
-  if (!canSeeClient(ctx, clientId)) throw new NotFoundError("Client not found");
-  if (!can.editFields(ctx, clientId)) throw new ForbiddenError();
-}
-function assertManage(ctx: Ctx, clientId: string) {
-  assertView(ctx, clientId);
-  if (!can.manageLps(ctx, clientId)) throw new ForbiddenError();
+function assertAdmin(ctx: Ctx) {
+  if (ctx.role !== "SUPER_ADMIN") throw new ForbiddenError();
 }
 
-export async function getLookupConfig(ctx: Ctx, clientId: string) {
-  assertView(ctx, clientId);
-  return prisma.lookupConfig.findUnique({ where: { clientId } });
+export async function getLookupSetup(ctx: Ctx) {
+  assertAdmin(ctx);
+  const cfg = await config();
+  return { cfg, outboundUrl: outboundUrl(cfg) };
 }
 
-export async function saveLookupConfig(ctx: Ctx, clientId: string, input: { mentorSheetUrl: string; subMentorSheetUrl: string; webhookId: string; refreshMinutes: number; enabled: boolean }) {
-  assertManage(ctx, clientId);
+export async function saveLookupConfig(ctx: Ctx, input: { mentorSheetUrl: string; subMentorSheetUrl: string; outboundUrl: string; refreshMinutes: number; enabled: boolean }) {
+  assertAdmin(ctx);
   const mentor = input.mentorSheetUrl.trim() || null;
   const sub = input.subMentorSheetUrl.trim() || null;
   for (const u of [mentor, sub]) if (u) sheetCsvUrl(u); // throws a friendly error for a wrong link
-  if (input.webhookId && !(await webhookTarget(input.webhookId, clientId))) throw new NotFoundError("Webhook not found");
-  const refreshMinutes = Math.min(60, Math.max(1, Math.round(input.refreshMinutes || 2)));
-  const before = await prisma.lookupConfig.findUnique({ where: { clientId } });
-  const data = {
-    mentorSheetUrl: mentor, subMentorSheetUrl: sub, webhookId: input.webhookId || null, refreshMinutes, enabled: input.enabled,
-    // A changed link starts from scratch.
-    ...(before?.mentorSheetUrl !== mentor ? { mentorRows: Prisma.DbNull, mentorReadAt: null, mentorError: null } : {}),
-    ...(before?.subMentorSheetUrl !== sub ? { subMentorRows: Prisma.DbNull, subMentorReadAt: null, subMentorError: null } : {}),
-  };
-  await prisma.lookupConfig.upsert({ where: { clientId }, update: data, create: { clientId, apiToken: newWebhookToken(), ...data } });
-  await prisma.auditLog.create({ data: { actorId: ctx.userId, clientId, action: "lookup.settings", target: clientId } });
-  await reloadSheets(ctx, clientId);
+  const out = input.outboundUrl.trim();
+  if (out) {
+    const problem = webhookUrlProblem(out);
+    if (problem) throw new Error(problem);
+  }
+  const before = await config();
+  await prisma.lookupConfig.update({
+    where: { id: GLOBAL },
+    data: {
+      mentorSheetUrl: mentor,
+      subMentorSheetUrl: sub,
+      outboundConfig: out ? encryptJson({ url: out }) : null,
+      refreshMinutes: Math.min(60, Math.max(1, Math.round(input.refreshMinutes || 2))),
+      enabled: input.enabled,
+      // A changed link starts from scratch.
+      ...(before.mentorSheetUrl !== mentor ? { mentorRows: Prisma.DbNull, mentorReadAt: null, mentorError: null } : {}),
+      ...(before.subMentorSheetUrl !== sub ? { subMentorRows: Prisma.DbNull, subMentorReadAt: null, subMentorError: null } : {}),
+    },
+  });
+  await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.settings", target: "global" } });
+  await reloadSheets(ctx);
 }
 
-export async function rotateLookupToken(ctx: Ctx, clientId: string) {
-  assertManage(ctx, clientId);
-  await prisma.lookupConfig.update({ where: { clientId }, data: { apiToken: newWebhookToken() } });
-  await prisma.auditLog.create({ data: { actorId: ctx.userId, clientId, action: "lookup.rotate_token", target: clientId } });
+export async function rotateLookupToken(ctx: Ctx) {
+  assertAdmin(ctx);
+  await config();
+  await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { apiToken: newWebhookToken() } });
+  await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.rotate_token", target: "global" } });
 }
 
 /** Re-reads both sheets now. */
-export async function reloadSheets(ctx: Ctx, clientId: string) {
-  assertView(ctx, clientId);
-  const cfg = await prisma.lookupConfig.findUnique({ where: { clientId } });
-  if (!cfg) return;
+export async function reloadSheets(ctx: Ctx) {
+  assertAdmin(ctx);
+  const cfg = await config();
   await Promise.all([freshRows(cfg, "mentor", true), freshRows(cfg, "subMentor", true)]);
 }
 
 /** One card per sheet: connected?, rows loaded, last read, or the problem. */
-export function sheetStatus(cfg: Config | null) {
+export function sheetStatus(cfg: Config) {
   return (["mentor", "subMentor"] as const).map((sheet) => {
     const f = FIELDS[sheet];
-    const rows = (cfg?.[f.rows] as SheetRow[] | null) ?? null;
-    return { sheet, label: sheet === "mentor" ? "Mentor sheet" : "Sub-mentor sheet", url: cfg?.[f.url] ?? null, rows: rows?.length ?? null, readAt: cfg?.[f.readAt] ?? null, error: cfg?.[f.error] ?? null };
+    const rows = (cfg[f.rows] as SheetRow[] | null) ?? null;
+    return { sheet, label: sheet === "mentor" ? "Mentor sheet" : "Sub-mentor sheet", url: cfg[f.url] ?? null, rows: rows?.length ?? null, readAt: cfg[f.readAt] ?? null, error: cfg[f.error] ?? null };
   });
 }
 
-export async function checkByHand(ctx: Ctx, clientId: string, input: Record<string, unknown>, send: boolean) {
-  assertView(ctx, clientId);
-  return lookupAndLog(clientId, lookupInput(input), "panel", send);
+export async function checkByHand(ctx: Ctx, input: Record<string, unknown>, send: boolean) {
+  assertAdmin(ctx);
+  return lookupAndLog(lookupInput(input), "panel", send);
 }
 
-export async function recentLookups(ctx: Ctx, clientId: string) {
-  assertView(ctx, clientId);
-  return prisma.leadLookup.findMany({ where: { clientId }, orderBy: { createdAt: "desc" }, take: 50 });
+export async function recentLookups(ctx: Ctx) {
+  assertAdmin(ctx);
+  return prisma.leadLookup.findMany({ orderBy: { createdAt: "desc" }, take: 50 });
 }
 
 /** Send (again) a lookup that failed or wasn't sent. */
 export async function resendLookup(ctx: Ctx, lookupId: string) {
+  assertAdmin(ctx);
   const row = await prisma.leadLookup.findUnique({ where: { id: lookupId } });
   if (!row) throw new NotFoundError("Lookup not found");
-  assertView(ctx, row.clientId);
-  const cfg = await prisma.lookupConfig.findUnique({ where: { clientId: row.clientId } });
-  if (!cfg?.webhookId) throw new Error("Choose a lookup webhook in the settings first.");
+  if (!(await config()).outboundConfig) throw new Error("Add your webhook URL in the settings first.");
   await prisma.leadLookup.update({ where: { id: lookupId }, data: { webhookStatus: "not_sent", webhookError: null } });
   await enqueue("lookup.deliver", { lookupId }, { attempts: 1 });
-}
-
-/** Checks the client's existing leads once (no webhooks). Returns how many were checked. */
-export async function checkExistingLeads(ctx: Ctx, clientId: string) {
-  assertManage(ctx, clientId);
-  const cfg = await prisma.lookupConfig.findUnique({ where: { clientId } });
-  if (!configured(cfg)) throw new Error("Add the sheet links first.");
-  const [m, s] = await Promise.all([freshRows(cfg, "mentor", true), freshRows(cfg, "subMentor", true)]);
-  let cursor: string | undefined;
-  let done = 0;
-  for (;;) {
-    const batch = await prisma.lead.findMany({
-      where: { clientId, deletedAt: null },
-      orderBy: { id: "asc" },
-      take: 500,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: { id: true, emailNormalised: true, phoneNormalised: true },
-    });
-    if (!batch.length) break;
-    cursor = batch[batch.length - 1].id;
-    for (const l of batch) {
-      if (!l.emailNormalised && !l.phoneNormalised) continue;
-      await saveOnLead(l.id, matchLead(m.rows, s.rows, { email: l.emailNormalised, phone: l.phoneNormalised }));
-      done++;
-    }
-  }
-  await prisma.auditLog.create({ data: { actorId: ctx.userId, clientId, action: "lookup.check_existing", target: `${done} leads` } });
-  return done;
 }

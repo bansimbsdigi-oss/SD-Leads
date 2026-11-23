@@ -8,7 +8,6 @@ import type { Condition } from "@/lib/leadFilterSpec";
 import { formatAnswer, formatDateTime } from "@/lib/leadColumns";
 import { leadMatchesConditions } from "@/lib/leadQuery";
 import { logger } from "@/lib/logger";
-import { LEAD_TYPE_LABEL, type LeadType } from "@/lib/lookupLabels";
 import { notifyClient } from "@/lib/notifications";
 import { enqueue } from "@/lib/queue";
 import { can, canSeeClient, ForbiddenError, NotFoundError, type Ctx } from "@/lib/tenant";
@@ -119,14 +118,6 @@ export async function deleteWebhookRule(ctx: Ctx, id: string) {
   await audit(ctx, "webhook.delete", id, rule.clientId);
 }
 
-/** URL and name of an active webhook rule of this client (for sending lead lookup results). */
-export async function webhookTarget(integrationId: string, clientId: string) {
-  const row = await prisma.integration.findFirst({ where: { id: integrationId, clientId, type: "webhook" } });
-  if (!row) return null;
-  const rule = toRule(row);
-  return { name: rule.name, url: rule.url, active: rule.status === "active" };
-}
-
 // ---------- Payload ----------
 
 /** One flat JSON per lead, easy to map field by field in Pabbly. */
@@ -168,15 +159,6 @@ export async function buildLeadPayload(leadId: string, event = "lead.created") {
     email: lead.emailNormalised ?? "",
     is_duplicate: lead.isDuplicate,
     quiz_score: lead.totalScore,
-    // Lead lookup (Mentor / Sub-mentor sheets): empty when the client doesn't use it.
-    lead_type: lead.lookupType ?? "",
-    lead_type_label: lead.lookupType ? LEAD_TYPE_LABEL[lead.lookupType as LeadType] ?? lead.lookupType : "",
-    is_mentor_lead: lead.lookupType === "mentor",
-    is_sub_mentor_lead: lead.lookupType === "sub_mentor",
-    is_none_of_above: lead.lookupType === "none",
-    mentor_name: lead.mentorName ?? "",
-    sub_mentor_name: lead.subMentorName ?? "",
-    matched_by: lead.lookupMatchedBy ?? "",
     answers: flat,
     fields: Object.keys(answers).map((k) => ({ key: k, label: labelOf.get(k) ?? k, value: flat[k] })),
     tracking: lead.tracking as Record<string, string>,

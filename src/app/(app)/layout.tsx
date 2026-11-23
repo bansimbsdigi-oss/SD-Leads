@@ -29,6 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       : { href: `/clients/${ctx.clientId}`, label: "Landing pages", icon: "clients", match: ["/clients", "/lps"], section: "Workspace" },
     ...(ctx.role === "SUPER_ADMIN"
       ? ([
+          { href: "/lookup", label: "Lead lookup", icon: "lookup", match: ["/lookup"], section: "Admin" },
           { href: "/users", label: "Sabhi team", icon: "team", match: ["/users"], section: "Admin" },
           { href: "/audit", label: "Audit log", icon: "audit", match: ["/audit"], section: "Admin" },
           { href: "/errors", label: await errorsLabel(), icon: "errors", match: ["/errors"], section: "Admin" },

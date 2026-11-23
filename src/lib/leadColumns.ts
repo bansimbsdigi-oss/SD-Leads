@@ -2,8 +2,6 @@
 // Column ids match leadQuery field ids, so every column can be sorted.
 import { columnKeys, formFieldGroups, groupTracking, trackingAbsorbed, trackingKeys, trackingLabel, type LeadRow } from "@/lib/leadQuery";
 import { RECEIVED_VIA_LABEL, STANDARD_COLUMNS, standardValue } from "@/lib/standardColumns";
-import { prisma } from "@/lib/db";
-import { LEAD_TYPE_LABEL, type LeadType } from "@/lib/lookupLabels";
 import { isSabhiStaff, type Ctx } from "@/lib/tenant";
 
 export type Column = { id: string; header: string; value: (lead: LeadRow) => string };
@@ -30,12 +28,10 @@ export function formatAnswer(v: unknown): string {
 export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: string }): Promise<Column[]> {
   const singleClient = Boolean(scope.clientId) || !isSabhiStaff(ctx);
   const trackScope = { clientId: scope.clientId ?? (isSabhiStaff(ctx) ? undefined : ctx.clientId ?? undefined), lpId: scope.lpId };
-  const [{ answers, absorbed }, tracking, trackAbsorbed, lookupClients] = await Promise.all([
+  const [{ answers, absorbed }, tracking, trackAbsorbed] = await Promise.all([
     formFieldGroups(ctx, scope),
     trackingKeys(ctx, trackScope),
     trackingAbsorbed(ctx, trackScope),
-    // Lead type / Mentor / Sub-mentor columns only for clients that use lead lookup.
-    prisma.lookupConfig.count({ where: trackScope.clientId ? { clientId: trackScope.clientId } : {} }),
   ]);
   const grouped = groupTracking(answers, tracking);
   const firstFilled = (vals: unknown[]) => formatAnswer(vals.find((x) => x !== undefined && x !== null && x !== "") ?? "");
@@ -55,13 +51,6 @@ export async function leadColumns(ctx: Ctx, scope: { clientId?: string; lpId?: s
     ...(singleClient ? [] : [{ id: "client", header: "Client", value: (l: LeadRow) => l.client.name }]),
     { id: "source", header: "Received via", value: (l) => RECEIVED_VIA_LABEL[l.source] ?? l.source },
     { id: "score", header: "Score", value: (l) => (l.totalScore ?? "").toString() },
-    ...(lookupClients
-      ? ([
-          { id: "lookup_type", header: "Lead type", value: (l) => (l.lookupType ? LEAD_TYPE_LABEL[l.lookupType as LeadType] ?? l.lookupType : "") },
-          { id: "mentor_name", header: "Mentor", value: (l) => l.mentorName ?? "" },
-          { id: "sub_mentor_name", header: "Sub-mentor", value: (l) => l.subMentorName ?? "" },
-        ] satisfies Column[])
-      : []),
     ...answers.map<Column>((f) => ({
       id: `a:${f.key}`,
       header: f.label,

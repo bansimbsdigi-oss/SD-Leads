@@ -74,92 +74,84 @@ describe("lead lookup: rules", () => {
   });
 });
 
-describe("lead lookup: in the app", () => {
+describe("lead lookup: global webhook in, your webhook out", () => {
   beforeEach(async () => {
     await resetDb();
     pabbly.length = 0;
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  async function setup(sheets: Sheets = { mentor: MENTOR_CSV, sub: SUB_CSV }) {
+  async function setup(sheets: Sheets = { mentor: MENTOR_CSV, sub: SUB_CSV }, outboundUrl = "https://93.184.216.34/pabbly") {
     fakeNet(sheets);
-    const { client, lp } = await makeClient("alpha");
-    const admin = await makeUser("CLIENT_ADMIN", client.id);
-    const { createWebhookRule } = await import("@/lib/outbound/webhooks");
-    const hook = await createWebhookRule(admin, client.id, { name: "Pabbly", url: "https://93.184.216.34/pabbly", conditions: [] });
-    const { saveLookupConfig } = await import("@/lib/lookup");
-    await saveLookupConfig(admin, client.id, { mentorSheetUrl: MENTOR_URL, subMentorSheetUrl: SUB_URL, webhookId: hook, refreshMinutes: 2, enabled: true });
-    return { client, lp, admin, hook };
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const { saveLookupConfig, getLookupSetup } = await import("@/lib/lookup");
+    await saveLookupConfig(admin, { mentorSheetUrl: MENTOR_URL, subMentorSheetUrl: SUB_URL, outboundUrl, refreshMinutes: 2, enabled: true });
+    const { cfg } = await getLookupSetup(admin);
+    return { admin, token: cfg.apiToken };
   }
 
-  it("new leads are checked on arrival and the result goes out in their webhook", async () => {
-    const { client, lp } = await setup();
-    const { runJob } = await import("@/lib/jobs");
-    const { buildLeadPayload } = await import("@/lib/outbound/webhooks");
-    const p = payload({ fields: [{ key: "name", role: "name", value: "Sameer Khan" }, { key: "phone", type: "tel", value: "7000000002" }] });
-    const leadId = (await ingestLead(lp, ingestPayloadSchema.parse(p))).leadId;
-    await runJob("lead.created", { leadId }, 1);
-    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: leadId } });
-    expect([lead.lookupType, lead.mentorName, lead.subMentorName, lead.lookupMatchedBy]).toEqual(["sub_mentor", "Anil Kapoor", "Vikram Singh", "phone"]);
-    const out = await buildLeadPayload(leadId);
-    expect(out).toMatchObject({ lead_type: "sub_mentor", lead_type_label: "Sub-mentor's lead", is_sub_mentor_lead: true, mentor_name: "Anil Kapoor", sub_mentor_name: "Vikram Singh" });
-    expect(await prisma.leadLookup.count({ where: { clientId: client.id, source: "lead", webhookStatus: "with_lead" } })).toBe(1);
-  });
-
-  it("API: wrong key 401, no contact 422, otherwise the result straight away and saved", async () => {
-    const { client } = await setup();
+  const post = async (token: string, body: unknown) => {
     const { POST } = await import("@/app/api/lookup/[token]/route");
-    const cfg = await prisma.lookupConfig.findUniqueOrThrow({ where: { clientId: client.id } });
-    const call = (token: string, body: unknown) =>
-      POST(new NextRequest(`http://localhost/api/lookup/${token}`, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } }), { params: Promise.resolve({ token }) });
+    return POST(new NextRequest(`http://localhost/api/lookup/${token}`, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } }), { params: Promise.resolve({ token }) });
+  };
 
-    expect((await call("a".repeat(48), { email: "x@y.z" })).status).toBe(401);
-    expect((await call(cfg.apiToken, { name: "No contact" })).status).toBe(422);
-    const res = await call(cfg.apiToken, { name: "Asha Verma", email: "asha.verma@EXAMPLE.com", phone: "+91 98765 43210" });
+  it("wrong key 401, no contact 422; otherwise the result straight away, saved, and sent to your webhook", async () => {
+    const { token } = await setup();
+    const { deliverLookup } = await import("@/lib/lookup");
+    expect((await post("a".repeat(48), { email: "x@y.z" })).status).toBe(401);
+    expect((await post(token, { name: "No contact" })).status).toBe(422);
+
+    const res = await post(token, { full_name: "Sameer Khan", mobile: "+91 70000 00002" });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ event: "lead_lookup", lead_type: "mentor", mentor_name: "Anil Kapoor", matched_by: "email", source: "api", name: "Asha Verma" });
-    expect(await prisma.leadLookup.count({ where: { clientId: client.id, source: "api" } })).toBe(1);
+    const body = await res.json();
+    expect(body).toMatchObject({ event: "lead_lookup", lead_type: "sub_mentor", mentor_name: "Anil Kapoor", sub_mentor_name: "Vikram Singh", matched_by: "phone", source: "webhook", name: "Sameer Khan" });
+
+    const row = await prisma.leadLookup.findUniqueOrThrow({ where: { id: body.lookup_id } });
+    expect([row.source, row.webhookStatus, row.clientId]).toEqual(["webhook", "not_sent", null]);
+    await deliverLookup(row.id); // what the queue runs
+    expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: row.id } })).webhookStatus).toBe("sent");
+    expect(pabbly.at(-1)?.body).toMatchObject({ event: "lead_lookup", lead_type: "sub_mentor", sub_mentor_name: "Vikram Singh" });
   });
 
-  it("Pabbly down: lookup saved as failed; Send works once it's back", async () => {
-    const { client, admin } = await setup();
+  it("your webhook down: saved as failed; Send works once it's back", async () => {
+    const { admin } = await setup();
     const { checkByHand, deliverLookup, resendLookup } = await import("@/lib/lookup");
-    const { lookupId } = await checkByHand(admin, client.id, { email: "sameer@example.com" }, true);
+    const { lookupId } = await checkByHand(admin, { email: "asha.verma@example.com" }, true);
     fakeNet({ mentor: MENTOR_CSV, sub: SUB_CSV }, 500);
     await expect(deliverLookup(lookupId)).rejects.toThrow(/failed/);
     expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: lookupId } })).webhookStatus).toBe("failed");
     fakeNet({ mentor: MENTOR_CSV, sub: SUB_CSV }, 200);
     await resendLookup(admin, lookupId);
     await deliverLookup(lookupId);
-    const row = await prisma.leadLookup.findUniqueOrThrow({ where: { id: lookupId } });
-    expect(row.webhookStatus).toBe("sent");
-    expect(pabbly.at(-1)?.body).toMatchObject({ event: "lead_lookup", lead_type: "sub_mentor", sub_mentor_name: "Vikram Singh", source: "panel" });
+    expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: lookupId } })).webhookStatus).toBe("sent");
+    expect(pabbly.at(-1)?.body).toMatchObject({ lead_type: "mentor", mentor_name: "Anil Kapoor", source: "panel" });
   });
 
   it("a sheet that isn't shared shows the problem; the other still works; Google down uses the last good copy", async () => {
-    const { client, admin } = await setup({ mentor: MENTOR_CSV, sub: "html" });
-    const { checkByHand, reloadSheets, sheetStatus } = await import("@/lib/lookup");
-    let cfg = await prisma.lookupConfig.findUniqueOrThrow({ where: { clientId: client.id } });
-    const [m, s] = sheetStatus(cfg);
+    const { admin } = await setup({ mentor: MENTOR_CSV, sub: "html" });
+    const { checkByHand, getLookupSetup, reloadSheets, sheetStatus } = await import("@/lib/lookup");
+    const [m, s] = sheetStatus((await getLookupSetup(admin)).cfg);
     expect([m.rows, m.error]).toEqual([3, null]);
     expect(s.error).toMatch(/isn't shared/);
-    expect((await checkByHand(admin, client.id, { email: "asha.verma@example.com" }, false)).result.leadType).toBe("mentor");
+    expect((await checkByHand(admin, { email: "asha.verma@example.com" }, false)).result.leadType).toBe("mentor");
 
     fakeNet({ mentor: new Error("getaddrinfo ENOTFOUND"), sub: SUB_CSV });
-    await reloadSheets(admin, client.id);
-    cfg = await prisma.lookupConfig.findUniqueOrThrow({ where: { clientId: client.id } });
-    expect(sheetStatus(cfg)[0]).toMatchObject({ rows: 3, error: expect.stringMatching(/ENOTFOUND/) });
-    expect((await checkByHand(admin, client.id, { email: "asha.verma@example.com" }, false)).result.mentorName).toBe("Anil Kapoor");
+    await reloadSheets(admin);
+    expect(sheetStatus((await getLookupSetup(admin)).cfg)[0]).toMatchObject({ rows: 3, error: expect.stringMatching(/ENOTFOUND/) });
+    expect((await checkByHand(admin, { email: "asha.verma@example.com" }, false)).result.mentorName).toBe("Anil Kapoor");
   });
 
-  it("checks existing leads once; members can't change the settings", async () => {
-    const { client, lp, admin } = await setup();
-    const { checkExistingLeads, saveLookupConfig } = await import("@/lib/lookup");
-    const p = payload({ fields: [{ key: "name", role: "name", value: "Asha" }, { key: "phone", type: "tel", value: "9876543210" }] });
-    const id = (await ingestLead(lp, ingestPayloadSchema.parse(p))).leadId;
-    expect(await checkExistingLeads(admin, client.id)).toBe(1);
-    expect((await prisma.lead.findUniqueOrThrow({ where: { id } })).lookupType).toBe("mentor");
-    const member = await makeUser("CLIENT_MEMBER", client.id);
-    await expect(saveLookupConfig(member, client.id, { mentorSheetUrl: "", subMentorSheetUrl: "", webhookId: "", refreshMinutes: 2, enabled: false })).rejects.toThrow();
+  it("only super admins manage it; a bad webhook URL or non-Google sheet is refused; no webhook = not sent", async () => {
+    const { admin, token } = await setup(undefined, "");
+    const { saveLookupConfig } = await import("@/lib/lookup");
+    const { client } = await makeClient("alpha");
+    const clientAdmin = await makeUser("CLIENT_ADMIN", client.id);
+    const base = { mentorSheetUrl: MENTOR_URL, subMentorSheetUrl: SUB_URL, outboundUrl: "", refreshMinutes: 2, enabled: true };
+    await expect(saveLookupConfig(clientAdmin, base)).rejects.toThrow();
+    await expect(saveLookupConfig(admin, { ...base, outboundUrl: "http://localhost:5432/x" })).rejects.toThrow();
+    await expect(saveLookupConfig(admin, { ...base, mentorSheetUrl: "https://example.com/sheet" })).rejects.toThrow(/Google Sheets/);
+    const body = await (await post(token, { email: "nobody@example.com" })).json();
+    expect(body.lead_type).toBe("none");
+    expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: body.lookup_id } })).webhookStatus).toBe("off");
   });
 });
