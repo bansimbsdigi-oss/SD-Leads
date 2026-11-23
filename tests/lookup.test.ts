@@ -1,9 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
-import { ingestPayloadSchema } from "@/lib/ingest/schema";
-import { ingestLead } from "@/lib/ingest/service";
-import { makeClient, makeUser, payload, resetDb } from "./helpers";
+import { makeClient, makeUser, resetDb } from "./helpers";
 
 const MENTOR_CSV = `Mentor Name,Email ID,Mobile Number
 Anil Kapoor,Asha.Verma@Example.com,+91 98765 43210
