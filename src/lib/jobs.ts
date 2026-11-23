@@ -1,6 +1,6 @@
 // Background job handlers, shared by the BullMQ worker and the in-process fallback (INLINE_JOBS=1).
 import { logger } from "@/lib/logger";
-import { deliverLookup } from "@/lib/lookup";
+import { autoLookupLead, deliverLookup } from "@/lib/lookup";
 import { deliverLead, fanOutLead } from "@/lib/outbound/webhooks";
 import type { JobMap } from "@/lib/queue";
 
@@ -8,6 +8,7 @@ type Handlers = { [K in keyof JobMap]: (data: JobMap[K], attempt: number) => Pro
 
 const handlers: Handlers = {
   async "lead.created"({ leadId }) {
+    await autoLookupLead(leadId); // only when "Check every new lead" is on
     await fanOutLead(leadId);
   },
   async "webhook.deliver"({ integrationId, leadId }, attempt) {

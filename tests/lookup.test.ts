@@ -62,7 +62,8 @@ describe("lead lookup: rules", () => {
     expect(r({ phone: "098765-43210" })).toMatchObject({ leadType: "mentor", matchedBy: "phone" });
     expect(r({ phone: "+91 70000 00002" })).toEqual({ leadType: "sub_mentor", mentorName: "Anil Kapoor", subMentorName: "Vikram Singh", matchedBy: "phone" });
     expect(r({ email: "nobody@example.com", phone: "9111111111" })).toEqual({ leadType: "none", mentorName: null, subMentorName: null, matchedBy: null });
-    expect(r({ email: "both@example.com" })).toEqual({ leadType: "mentor", mentorName: "Neha Rao", subMentorName: "Priya Das", matchedBy: "email" });
+    // In both sheets: Mentor's lead, and the Sub-mentor sheet isn't checked.
+    expect(r({ email: "both@example.com" })).toEqual({ leadType: "mentor", mentorName: "Neha Rao", subMentorName: null, matchedBy: "email" });
   });
 
   it("API input: alternative names; no email and no phone is refused", async () => {
@@ -151,5 +152,33 @@ describe("lead lookup: global webhook in, your webhook out", () => {
     const body = await (await post(token, { email: "nobody@example.com" })).json();
     expect(body.lead_type).toBe("none");
     expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: body.lookup_id } })).webhookStatus).toBe("off");
+  });
+
+  it("uploaded CSV sheets are used instead of links, and kept when the link field is left empty", async () => {
+    const { admin, token } = await setup({ mentor: MENTOR_CSV, sub: SUB_CSV });
+    const { getLookupSetup, saveLookupConfig, sheetStatus, uploadSheet } = await import("@/lib/lookup");
+    const csv = "Email,Phone,Mentor Name\nupload@example.com,9822222222,Ravi Menon\n";
+    expect(await uploadSheet(admin, "mentor", new File([csv], "mentors.csv", { type: "text/csv" }))).toBe(1);
+    await saveLookupConfig(admin, { mentorSheetUrl: "", subMentorSheetUrl: SUB_URL, outboundUrl: "", refreshMinutes: 2, enabled: true });
+    const status = sheetStatus((await getLookupSetup(admin)).cfg)[0];
+    expect([status.fileName, status.url, status.rows]).toEqual(["mentors.csv", null, 1]);
+    const body = await (await post(token, { phone: "+91 98222 22222" })).json();
+    expect(body).toMatchObject({ lead_type: "mentor", mentor_name: "Ravi Menon" });
+    await expect(uploadSheet(admin, "mentor", new File(["Name,City\nA,B\n"], "bad.csv"))).rejects.toThrow(/Email or Phone/);
+  });
+
+  it("with \"check every new lead\" on, new SD-Leads leads are looked up and sent automatically", async () => {
+    const { admin } = await setup();
+    const { saveLookupConfig } = await import("@/lib/lookup");
+    await saveLookupConfig(admin, { mentorSheetUrl: MENTOR_URL, subMentorSheetUrl: SUB_URL, outboundUrl: "https://93.184.216.34/pabbly", refreshMinutes: 2, enabled: true, autoCheckLeads: true });
+    const { ingestLead } = await import("@/lib/ingest/service");
+    const { ingestPayloadSchema } = await import("@/lib/ingest/schema");
+    const { payload } = await import("./helpers");
+    const { runJob } = await import("@/lib/jobs");
+    const { lp } = await makeClient("alpha");
+    const leadId = (await ingestLead(lp, ingestPayloadSchema.parse(payload({ fields: [{ key: "name", role: "name", value: "Sameer" }, { key: "phone", type: "tel", value: "7000000002" }] })))).leadId;
+    await runJob("lead.created", { leadId }, 1);
+    const row = await prisma.leadLookup.findFirstOrThrow({ where: { leadId } });
+    expect([row.source, row.leadType, row.subMentorName]).toEqual(["lead", "sub_mentor", "Vikram Singh"]);
   });
 });

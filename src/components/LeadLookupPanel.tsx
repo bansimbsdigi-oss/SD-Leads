@@ -1,14 +1,15 @@
 "use client";
 
-import { RefreshCw, Search, Send, TriangleAlert } from "lucide-react";
+import { FileUp, RefreshCw, Search, Send, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { checkLeadByHandAction, reloadSheetsAction, resendLookupAction } from "@/app/actions";
+import { checkLeadByHandAction, reloadSheetsAction, resendLookupAction, uploadSheetAction } from "@/app/actions";
+import { ActionForm } from "@/components/ActionForm";
 import { Badge, Button, Field, Input, type Tone } from "@/components/ui";
 
 const TYPE_TONE: Record<string, Tone> = { mentor: "green", sub_mentor: "violet", none: "slate" };
 
-type SheetCard = { sheet: string; label: string; url: string | null; rows: number | null; readAt: string | null; error: string | null };
+type SheetCard = { sheet: string; label: string; url: string | null; fileName: string | null; rows: number | null; readAt: string | null; error: string | null };
 
 /** Sheet status cards with Reload. */
 export function LookupSheets({ sheets }: { sheets: SheetCard[] }) {
@@ -21,9 +22,10 @@ export function LookupSheets({ sheets }: { sheets: SheetCard[] }) {
           <div key={s.sheet} className="rounded-xl border border-line p-4">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm font-semibold">{s.label}</p>
-              {!s.url ? <Badge>Not connected</Badge> : s.error ? <Badge tone="red">Problem</Badge> : <Badge tone="green">Connected</Badge>}
+              {!s.url && !s.fileName ? <Badge>Not connected</Badge> : s.error ? <Badge tone="red">Problem</Badge> : <Badge tone="green">{s.fileName ? "Uploaded" : "Google Sheet"}</Badge>}
             </div>
-            {s.url && s.rows !== null && <p className="mt-2 text-2xl font-semibold tabular-nums">{s.rows.toLocaleString("en-IN")} <span className="text-sm font-normal text-ink-muted">rows</span></p>}
+            {s.fileName && <p className="mt-1 truncate text-xs text-ink-muted" title={s.fileName}>File: {s.fileName}</p>}
+            {(s.url || s.fileName) && s.rows !== null && <p className="mt-2 text-2xl font-semibold tabular-nums">{s.rows.toLocaleString("en-IN")} <span className="text-sm font-normal text-ink-muted">rows</span></p>}
             {s.readAt && <p className="mt-0.5 text-xs text-ink-muted">Last read {new Date(s.readAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</p>}
             {s.error && (
               <p className="mt-2 flex items-start gap-1.5 text-xs text-red-700">
@@ -31,7 +33,19 @@ export function LookupSheets({ sheets }: { sheets: SheetCard[] }) {
                 <span>{s.error}{s.rows ? " Using the last good copy." : ""}</span>
               </p>
             )}
-            {!s.url && <p className="mt-2 text-xs text-ink-muted">Add the link in the settings.</p>}
+            {!s.url && !s.fileName && <p className="mt-2 text-xs text-ink-muted">Upload the file below, or paste a Google Sheet link in the settings.</p>}
+            <ActionForm action={uploadSheetAction} className="mt-3 space-y-2 border-t border-line pt-3" resetOnSuccess>
+              <input type="hidden" name="sheet" value={s.sheet} />
+              <input
+                type="file"
+                name="file"
+                required
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                aria-label={`${s.label} file`}
+                className="block w-full text-xs text-ink-muted file:mr-2 file:rounded-md file:border-0 file:bg-slate-100 file:px-2.5 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-slate-200"
+              />
+              <Button type="submit" variant="secondary" size="sm" className="w-full"><FileUp aria-hidden /> {s.fileName ? "Upload a new file" : "Upload CSV or Excel"}</Button>
+            </ActionForm>
           </div>
         ))}
       </div>

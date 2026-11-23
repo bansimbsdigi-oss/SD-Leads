@@ -25,7 +25,7 @@ import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
 import { mergeColumn, renameColumn, setColumnHidden, unmergeField } from "@/lib/fieldManager";
 import { addNote, assignLeads, bulkTag, clearJunk, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
 import { recordError, setErrorResolved } from "@/lib/errors";
-import { checkByHand, reloadSheets, resendLookup, rotateLookupToken, saveLookupConfig } from "@/lib/lookup";
+import { checkByHand, reloadSheets, resendLookup, rotateLookupToken, saveLookupConfig, uploadSheet } from "@/lib/lookup";
 import { listNotifications, markAllRead } from "@/lib/notifications";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -348,12 +348,27 @@ export async function saveLookupConfigAction(_: ActionState, fd: FormData): Prom
       outboundUrl: str(fd, "outboundUrl"),
       refreshMinutes: Number(str(fd, "refreshMinutes")) || 2,
       enabled: fd.get("enabled") === "on",
+      autoCheckLeads: fd.get("autoCheckLeads") === "on",
     });
   } catch (err) {
     return { error: errorMessage(err) };
   }
   revalidatePath("/lookup");
   return { ok: "Saved. Both sheets were read again." };
+}
+
+export async function uploadSheetAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  const sheet = str(fd, "sheet") === "subMentor" ? "subMentor" : "mentor";
+  try {
+    const file = fd.get("file");
+    if (!(file instanceof File)) return { error: "Choose a file first." };
+    const rows = await uploadSheet(ctx, sheet, file);
+    revalidatePath("/lookup");
+    return { ok: `${rows.toLocaleString("en-IN")} rows loaded.` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 export async function reloadSheetsAction() {

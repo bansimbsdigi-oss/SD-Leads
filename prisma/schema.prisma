@@ -113,6 +113,11 @@ model LookupConfig {
   mentorSheetUrl    String?   @map("mentor_sheet_url")
   subMentorSheetUrl String?   @map("sub_mentor_sheet_url")
   refreshMinutes    Int       @default(2) @map("refresh_minutes")
+  /// Name of an uploaded file used instead of a sheet link (its rows are in mentorRows / subMentorRows).
+  mentorFileName    String?   @map("mentor_file_name")
+  subMentorFileName String?   @map("sub_mentor_file_name")
+  /// Also check every new lead that arrives in SD-Leads (any client) and send the result on.
+  autoCheckLeads    Boolean   @default(false) @map("auto_check_leads")
   /// Secret in the inbound webhook URL: /api/lookup/{apiToken}
   apiToken          String    @unique @map("api_token")
   /// Where results are sent after each lookup (AES-256-GCM encrypted JSON { url }).

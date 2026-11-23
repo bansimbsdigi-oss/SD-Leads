@@ -17,7 +17,7 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
   not_sent: { label: "Not sent", tone: "amber" },
   off: { label: "No webhook", tone: "slate" },
 };
-const SOURCE: Record<string, string> = { webhook: "Webhook", panel: "Checked by hand" };
+const SOURCE: Record<string, string> = { webhook: "Webhook", panel: "Checked by hand", lead: "New SD-Leads lead" };
 
 const SAMPLE = `{
   "event": "lead_lookup",
@@ -46,7 +46,7 @@ export default async function LeadLookupPage() {
     <>
       <PageHeader
         title="Lead lookup"
-        subtitle="Send a lead to your webhook below. It's checked against the Mentor and Sub-mentor sheets, and the result (Mentor's lead, Sub-mentor's lead or None of the above) is sent to your webhook."
+        subtitle="Every lead sent to the webhook below is checked automatically: Mentor sheet first (found → Mentor's lead, sent right away), then the Sub-mentor sheet, otherwise None of the above. The result goes to your webhook."
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -63,7 +63,7 @@ export default async function LeadLookupPage() {
             </form>
           </Card>
 
-          <Card title={<span className="flex items-center gap-2"><FileSpreadsheet aria-hidden className="size-4 text-brand-700" /> 2. Sheets</span>} description={`Read live, at most every ${cfg.refreshMinutes} min. If Google can't be reached, the last good copy is used.`}>
+          <Card title={<span className="flex items-center gap-2"><FileSpreadsheet aria-hidden className="size-4 text-brand-700" /> 2. Sheets</span>} description={`Upload each sheet as CSV or Excel (.xlsx), or paste a Google Sheet link in the settings (read live, every ${cfg.refreshMinutes} min). Upload again whenever the list changes.`}>
             <LookupSheets sheets={sheets} />
           </Card>
 
@@ -104,10 +104,10 @@ export default async function LeadLookupPage() {
         <div className="space-y-6">
           <Card title="Settings" description="Share each sheet as “Anyone with the link can view” (or publish to the web as CSV), then paste its link.">
             <ActionForm action={saveLookupConfigAction} className="space-y-4">
-              <Field label="Mentor sheet link" htmlFor="lk-mentor" hint="Needs Email and/or Phone, and Mentor Name.">
+              <Field label="Mentor sheet link (optional)" htmlFor="lk-mentor" hint="Instead of uploading. Needs Email and/or Phone, and Mentor Name. Leave empty to keep an uploaded file.">
                 <Input id="lk-mentor" name="mentorSheetUrl" defaultValue={cfg.mentorSheetUrl ?? ""} placeholder="https://docs.google.com/spreadsheets/d/…" />
               </Field>
-              <Field label="Sub-mentor sheet link" htmlFor="lk-sub" hint="Needs Email and/or Phone, Sub Mentor Name, and optionally Mentor Name.">
+              <Field label="Sub-mentor sheet link (optional)" htmlFor="lk-sub" hint="Instead of uploading. Needs Email and/or Phone, Sub Mentor Name, and optionally Mentor Name.">
                 <Input id="lk-sub" name="subMentorSheetUrl" defaultValue={cfg.subMentorSheetUrl ?? ""} placeholder="https://docs.google.com/spreadsheets/d/…" />
               </Field>
               <Field label="3. Your webhook (results are sent here)" htmlFor="lk-out" hint="E.g. your Pabbly webhook URL. Every lookup from the webhook above is sent here with event = lead_lookup.">
@@ -121,6 +121,13 @@ export default async function LeadLookupPage() {
                   <input type="checkbox" name="enabled" defaultChecked={cfg.enabled} className="size-4" /> Lookup on
                 </label>
               </div>
+              <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm ring-1 ring-inset ring-line">
+                <input type="checkbox" name="autoCheckLeads" defaultChecked={cfg.autoCheckLeads} className="mt-0.5 size-4" />
+                <span>
+                  <span className="font-medium">Also check every new lead that comes into SD-Leads</span>
+                  <span className="block text-xs text-ink-muted">Leads from all clients&apos; landing pages and webhooks are looked up and sent to your webhook automatically, with no Pabbly step.</span>
+                </span>
+              </label>
               <Button type="submit" className="w-full">Save and read sheets</Button>
             </ActionForm>
           </Card>

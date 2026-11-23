@@ -91,7 +91,11 @@ const SUB_HEADERS = new Set(["sub mentor name", "submentor name", "sub mentor", 
  * first five rows. Rows without an email or phone are skipped; the first row for a person wins.
  */
 export function readSheetRows(csv: string, sheet: Sheet): SheetRow[] {
-  const rows = parseCsv(csv);
+  return readSheetTable(parseCsv(csv), sheet);
+}
+
+/** Same as readSheetRows, from a table already split into cells (an uploaded Excel file). */
+export function readSheetTable(rows: string[][], sheet: Sheet): SheetRow[] {
   const headerAt = rows.slice(0, 5).findIndex((r) => r.some((h) => EMAIL_HEADERS.has(norm(h)) || PHONE_HEADERS.has(norm(h))));
   if (headerAt < 0) throw new Error("No Email or Phone column found in the first rows. Check the header names.");
   const header = rows[headerAt].map(norm);
@@ -129,6 +133,8 @@ const FIELDS = {
   subMentor: { url: "subMentorSheetUrl", rows: "subMentorRows", readAt: "subMentorReadAt", error: "subMentorError" },
 } as const;
 
+const FILE = { mentor: "mentorFileName", subMentor: "subMentorFileName" } as const;
+
 type Config = NonNullable<Awaited<ReturnType<typeof prisma.lookupConfig.findUnique>>>;
 
 /** The one lookup setup, created on first use (with its secret inbound webhook token). */
@@ -146,7 +152,7 @@ async function freshRows(cfg: Config, sheet: Sheet, force = false): Promise<{ ro
   const f = FIELDS[sheet];
   const url = cfg[f.url];
   const cached = (cfg[f.rows] as SheetRow[] | null) ?? [];
-  if (!url) return { rows: [], error: null, readAt: null };
+  if (!url) return { rows: cfg[FILE[sheet]] ? cached : [], error: null, readAt: cfg[f.readAt] }; // an uploaded file, or nothing
   const age = cfg[f.readAt] ? Date.now() - cfg[f.readAt]!.getTime() : Infinity;
   if (!force && age < cfg.refreshMinutes * 60_000 && !cfg[f.error]) return { rows: cached, error: null, readAt: cfg[f.readAt] };
   try {
@@ -170,19 +176,22 @@ function find(rows: SheetRow[], email: string | null, phone: string | null) {
   return byPhone ? { row: byPhone, by: "phone" as const } : null;
 }
 
-/** The matching rules: Mentor sheet first; a lead in both is Mentor's lead with the sub-mentor's name filled in. */
+/**
+ * The matching rules: the Mentor sheet first. Found there → Mentor's lead, and the Sub-mentor sheet isn't
+ * checked. Otherwise the Sub-mentor sheet; otherwise None of the above.
+ */
 export function matchLead(mentorRows: SheetRow[], subRows: SheetRow[], lead: { email?: unknown; phone?: unknown }): LookupResult {
   const email = emailKey(lead.email);
   const phone = phoneKey(lead.phone);
   const m = find(mentorRows, email, phone);
+  if (m) return { leadType: "mentor", mentorName: m.row.name || null, subMentorName: null, matchedBy: m.by };
   const s = find(subRows, email, phone);
-  if (m) return { leadType: "mentor", mentorName: m.row.name || null, subMentorName: s?.row.name || null, matchedBy: m.by };
   if (s) return { leadType: "sub_mentor", mentorName: s.row.mentor, subMentorName: s.row.name || null, matchedBy: s.by };
   return { leadType: "none", mentorName: null, subMentorName: null, matchedBy: null };
 }
 
 /** The payload sent on: the same fields for every result, so they're mapped once in Pabbly. */
-export function lookupPayload(r: LookupResult, lead: { name?: string | null; email?: string | null; phone?: string | null }, source: "webhook" | "panel", at = new Date()) {
+export function lookupPayload(r: LookupResult, lead: { name?: string | null; email?: string | null; phone?: string | null }, source: "webhook" | "panel" | "lead", at = new Date()) {
   return {
     event: "lead_lookup",
     event_name: "Lead Lookup",
@@ -231,7 +240,7 @@ export async function lookupTokenMatches(token: string) {
 }
 
 /** Looks up a lead, saves it and (when `send` and an outbound webhook is set) queues it to be sent. */
-export async function lookupAndLog(input: { name: string | null; email: string | null; phone: string | null }, source: "webhook" | "panel", send: boolean) {
+export async function lookupAndLog(input: { name: string | null; email: string | null; phone: string | null; clientId?: string; leadId?: string }, source: "webhook" | "panel" | "lead", send: boolean) {
   const cfg = await config();
   if (!ready(cfg)) throw new Error(cfg.enabled ? "Lead lookup isn't set up yet: add the sheet links first." : "Lead lookup is switched off.");
   const [m, s] = await Promise.all([freshRows(cfg, "mentor"), freshRows(cfg, "subMentor")]);
@@ -240,6 +249,8 @@ export async function lookupAndLog(input: { name: string | null; email: string |
   const hasOut = Boolean(cfg.outboundConfig);
   const row = await prisma.leadLookup.create({
     data: {
+      clientId: input.clientId ?? null,
+      leadId: input.leadId ?? null,
       name: input.name, email: input.email, phone: input.phone, leadType: r.leadType, mentorName: r.mentorName,
       subMentorName: r.subMentorName, matchedBy: r.matchedBy, source, payload,
       webhookStatus: send && hasOut ? "not_sent" : send ? "off" : "not_sent",
@@ -247,6 +258,20 @@ export async function lookupAndLog(input: { name: string | null; email: string |
   });
   if (send && hasOut) await enqueue("lookup.deliver", { lookupId: row.id }, { attempts: 3, backoffMs: 20_000, jobId: `lookup-${row.id}` });
   return { result: r, payload, lookupId: row.id };
+}
+
+/** "Check every new SD-Leads lead": looks a new lead up and sends the result on. Never throws. */
+export async function autoLookupLead(leadId: string) {
+  try {
+    const cfg = await prisma.lookupConfig.findUnique({ where: { id: GLOBAL } });
+    if (!cfg?.autoCheckLeads || !ready(cfg)) return null;
+    const lead = await prisma.lead.findUnique({ where: { id: leadId }, select: { id: true, clientId: true, name: true, emailNormalised: true, phoneNormalised: true } });
+    if (!lead || (!lead.emailNormalised && !lead.phoneNormalised)) return null;
+    return await lookupAndLog({ name: lead.name, email: lead.emailNormalised, phone: lead.phoneNormalised, clientId: lead.clientId, leadId: lead.id }, "lead", true);
+  } catch (err) {
+    logger.error({ err, leadId }, "automatic lead lookup failed");
+    return null;
+  }
 }
 
 /** Sends one saved lookup to the outbound webhook. Throws on failure so the queue retries. */
@@ -275,7 +300,7 @@ export async function getLookupSetup(ctx: Ctx) {
   return { cfg, outboundUrl: outboundUrl(cfg) };
 }
 
-export async function saveLookupConfig(ctx: Ctx, input: { mentorSheetUrl: string; subMentorSheetUrl: string; outboundUrl: string; refreshMinutes: number; enabled: boolean }) {
+export async function saveLookupConfig(ctx: Ctx, input: { mentorSheetUrl: string; subMentorSheetUrl: string; outboundUrl: string; refreshMinutes: number; enabled: boolean; autoCheckLeads?: boolean }) {
   assertAdmin(ctx);
   const mentor = input.mentorSheetUrl.trim() || null;
   const sub = input.subMentorSheetUrl.trim() || null;
@@ -294,9 +319,14 @@ export async function saveLookupConfig(ctx: Ctx, input: { mentorSheetUrl: string
       outboundConfig: out ? encryptJson({ url: out }) : null,
       refreshMinutes: Math.min(60, Math.max(1, Math.round(input.refreshMinutes || 2))),
       enabled: input.enabled,
-      // A changed link starts from scratch.
-      ...(before.mentorSheetUrl !== mentor ? { mentorRows: Prisma.DbNull, mentorReadAt: null, mentorError: null } : {}),
-      ...(before.subMentorSheetUrl !== sub ? { subMentorRows: Prisma.DbNull, subMentorReadAt: null, subMentorError: null } : {}),
+      autoCheckLeads: Boolean(input.autoCheckLeads),
+      // A changed link starts from scratch; a new link replaces an uploaded file. A blank link keeps an upload.
+      ...(before.mentorSheetUrl !== mentor && (mentor || !before.mentorFileName)
+        ? { mentorRows: Prisma.DbNull, mentorReadAt: null, mentorError: null, mentorFileName: null }
+        : {}),
+      ...(before.subMentorSheetUrl !== sub && (sub || !before.subMentorFileName)
+        ? { subMentorRows: Prisma.DbNull, subMentorReadAt: null, subMentorError: null, subMentorFileName: null }
+        : {}),
     },
   });
   await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.settings", target: "global" } });
@@ -322,7 +352,15 @@ export function sheetStatus(cfg: Config) {
   return (["mentor", "subMentor"] as const).map((sheet) => {
     const f = FIELDS[sheet];
     const rows = (cfg[f.rows] as SheetRow[] | null) ?? null;
-    return { sheet, label: sheet === "mentor" ? "Mentor sheet" : "Sub-mentor sheet", url: cfg[f.url] ?? null, rows: rows?.length ?? null, readAt: cfg[f.readAt] ?? null, error: cfg[f.error] ?? null };
+    return {
+      sheet,
+      label: sheet === "mentor" ? "Mentor sheet" : "Sub-mentor sheet",
+      url: cfg[f.url] ?? null,
+      fileName: cfg[FILE[sheet]] ?? null,
+      rows: rows?.length ?? null,
+      readAt: cfg[f.readAt] ?? null,
+      error: cfg[f.error] ?? null,
+    };
   });
 }
 
@@ -344,4 +382,38 @@ export async function resendLookup(ctx: Ctx, lookupId: string) {
   if (!(await config()).outboundConfig) throw new Error("Add your webhook URL in the settings first.");
   await prisma.leadLookup.update({ where: { id: lookupId }, data: { webhookStatus: "not_sent", webhookError: null } });
   await enqueue("lookup.deliver", { lookupId }, { attempts: 1 });
+}
+
+// ---------- Uploaded sheets ----------
+
+const MAX_UPLOAD = 5 * 1024 * 1024;
+
+/** Uses an uploaded CSV or Excel file for a sheet (instead of a Google link). */
+export async function uploadSheet(ctx: Ctx, sheet: Sheet, file: File) {
+  assertAdmin(ctx);
+  if (!file || file.size === 0) throw new Error("Choose a file first.");
+  if (file.size > MAX_UPLOAD) throw new Error("The file must be 5 MB or smaller.");
+  const name = file.name.slice(0, 200);
+  const buf = Buffer.from(await file.arrayBuffer());
+  let rows: SheetRow[];
+  if (/\.xlsx$/i.test(name) || (buf[0] === 0x50 && buf[1] === 0x4b)) {
+    const { default: readXlsxFile } = await import("read-excel-file/node");
+    const table = await readXlsxFile(buf).catch(() => {
+      throw new Error("Couldn't read that Excel file. Save it as .xlsx or .csv and try again.");
+    });
+    rows = readSheetTable(table.map((r) => r.map((c) => (c === null || c === undefined ? "" : String(c)))), sheet);
+  } else if (/\.(csv|txt)$/i.test(name) || !/\.xls$/i.test(name)) {
+    rows = readSheetRows(buf.toString("utf8"), sheet);
+  } else {
+    throw new Error("Old .xls files aren't supported. Save it as .xlsx or .csv.");
+  }
+  if (!rows.length) throw new Error("No rows with an email or phone were found under the header.");
+  const f = FIELDS[sheet];
+  await config();
+  await prisma.lookupConfig.update({
+    where: { id: GLOBAL },
+    data: { [f.url]: null, [f.rows]: rows, [f.readAt]: new Date(), [f.error]: null, [FILE[sheet]]: name },
+  });
+  await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.upload", target: `${sheet}: ${name} (${rows.length} rows)` } });
+  return rows.length;
 }
