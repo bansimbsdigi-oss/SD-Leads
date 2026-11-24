@@ -14,7 +14,17 @@ import { ForbiddenError, NotFoundError, type Ctx } from "@/lib/tenant";
 
 export type Sheet = "mentor" | "subMentor";
 export type SheetRow = { email: string | null; phone: string | null; name: string; mentor: string | null };
-export type LookupResult = { leadType: LeadType; mentorName: string | null; mentorTeam: string | null; subMentorName: string | null; matchedBy: "email" | "phone" | null };
+export type LookupResult = {
+  leadType: LeadType;
+  mentorName: string | null;
+  mentorTeam: string | null;
+  mentorPhone: string | null;
+  mentorEmail: string | null;
+  subMentorName: string | null;
+  subMentorPhone: string | null;
+  subMentorEmail: string | null;
+  matchedBy: "email" | "phone" | null;
+};
 
 export { LEAD_TYPE_LABEL, type LeadType };
 
@@ -193,51 +203,82 @@ function find(rows: SheetRow[], email: string | null, phone: string | null) {
   return byPhone ? { row: byPhone, by: "phone" as const } : null;
 }
 
-// ---------- Teams ----------
+// ---------- Teams and sub-mentors ----------
 
-export const DEFAULT_TEAMS = "A = Anupa\nB = Varsha\nC = Jesal\nD = closed\nE = Poonam\nF = Shobhita\nG = Sweety";
-export type Teams = Map<string, string | null>; // letter → mentor name, or null for a closed team
+/** A Mentor team: the letter used in the Mentor sheet, its mentor and their contact. A closed team never gets leads. */
+export type Team = { code: string; mentor: string; phone: string; email: string; closed: boolean };
+/** A sub-mentor: the name used in the Sub-mentor sheet, their team and contact. */
+export type SubMentor = { name: string; team: string; phone: string; email: string };
+export type Directory = { teams: Team[]; subMentors: SubMentor[] };
 
-/** "A = Anupa" per line (also "A: Anupa", "Team A - Anupa"); "closed" marks a team that is never routed to. */
-export function parseTeams(text: string): Teams {
-  const teams: Teams = new Map();
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*(?:team\s*)?([a-z0-9]{1,3})\s*[=:\-–]\s*(.+?)\s*$/i.exec(line);
-    if (m) teams.set(m[1].toUpperCase(), /^closed$/i.test(m[2]) ? null : m[2]);
-  }
-  return teams;
-}
+export const DUMMY_MENTOR_PHONE = "0000000000";
+export const DEFAULT_TEAMS: Team[] = [
+  ["A", "Anupa"], ["B", "Varsha"], ["C", "Jesal"], ["D", ""], ["E", "Poonam"], ["F", "Shobhita"], ["G", "Sweety"],
+].map(([code, mentor]) => ({ code, mentor, phone: DUMMY_MENTOR_PHONE, email: "", closed: code === "D" }));
+
+const asList = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+export const directoryOf = (cfg: { teams: unknown; subMentors: unknown }): Directory => ({ teams: asList<Team>(cfg.teams), subMentors: asList<SubMentor>(cfg.subMentors) });
 
 /** The team code in a cell like "A", "Team A", "team-a" or "TEAM A"; null for anything else (e.g. a name). */
 export const teamCode = (v: string | null | undefined) => /^\s*(?:team\s*[-_ ]?\s*)?([a-z0-9]{1,3})\s*$/i.exec(v ?? "")?.[1]?.toUpperCase() ?? null;
 
-/** A mentor cell → { name, team, closed }. A team code is looked up in the team list. */
-function decodeMentor(raw: string | null, teams: Teams) {
-  const code = teamCode(raw);
-  if (!code || !teams.has(code)) return { name: raw || null, team: null, closed: false };
-  const name = teams.get(code)!;
-  return { name, team: code, closed: name === null };
+/** Names compared loosely: case, dots, "Dr." and extra spaces don't matter. */
+const personKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\b(dr|mr|mrs|ms)\b/g, " ").replace(/\s+/g, " ").trim();
+
+/** A sub-mentor by the name in the sheet: same name, or one name contained in the other ("Arpan Bagga" / "Arpan Bagga Sahay"). */
+export function findSubMentor(name: string | null, subs: SubMentor[]): SubMentor | null {
+  const key = personKey(name ?? "");
+  if (!key) return null;
+  const exact = subs.find((s) => personKey(s.name) === key);
+  if (exact) return exact;
+  const words = key.split(" ");
+  const within = (a: string[], b: string[]) => a.length >= 2 && a.every((w) => b.includes(w));
+  return subs.find((s) => { const w = personKey(s.name).split(" "); return within(words, w) || within(w, words); }) ?? null;
 }
+
+/** A mentor cell → its team: by team letter ("Team A"), or by the mentor's name. */
+function teamFor(raw: string | null, teams: Team[]): Team | null {
+  const code = teamCode(raw);
+  if (code) return teams.find((t) => t.code.toUpperCase() === code) ?? null;
+  const key = personKey(raw ?? "");
+  return key ? teams.find((t) => t.mentor && personKey(t.mentor) === key) ?? null : null;
+}
+
+const none = (matchedBy: LookupResult["matchedBy"] = null) => ({ mentorName: null, mentorTeam: null, mentorPhone: null, mentorEmail: null, subMentorName: null, subMentorPhone: null, subMentorEmail: null, matchedBy });
+const mentorOf = (t: Team | null, fallbackName: string | null) =>
+  t && !t.closed
+    ? { mentorName: t.mentor || fallbackName, mentorTeam: t.code, mentorPhone: t.phone || null, mentorEmail: t.email || null }
+    : { mentorName: t ? null : fallbackName, mentorTeam: t?.code ?? null, mentorPhone: null, mentorEmail: null };
 
 /**
  * The matching rules: the Mentor sheet first. Found there → Mentor's lead, and the Sub-mentor sheet isn't
- * checked. Otherwise the Sub-mentor sheet; otherwise None of the above.
+ * checked; rows of a closed team (e.g. Team D) are skipped. Otherwise the Sub-mentor sheet; otherwise None
+ * of the above. Mentor and sub-mentor contacts come from the directory (teams and sub-mentors).
  */
-export function matchLead(mentorRows: SheetRow[], subRows: SheetRow[], lead: { email?: unknown; phone?: unknown }, teams: Teams = parseTeams(DEFAULT_TEAMS)): LookupResult {
+export function matchLead(mentorRows: SheetRow[], subRows: SheetRow[], lead: { email?: unknown; phone?: unknown }, dir: Directory = { teams: DEFAULT_TEAMS, subMentors: [] }): LookupResult {
   const email = emailKey(lead.email);
   const phone = phoneKey(lead.phone);
-  // Rows of a closed team (e.g. Team D) are never routed to: the lead goes on to the Sub-mentor sheet.
-  const m = find(mentorRows.filter((r) => !decodeMentor(r.name, teams).closed), email, phone);
+  const m = find(mentorRows.filter((r) => !teamFor(r.name, dir.teams)?.closed), email, phone);
   if (m) {
-    const d = decodeMentor(m.row.name, teams);
-    return { leadType: "mentor", mentorName: d.name, mentorTeam: d.team, subMentorName: null, matchedBy: m.by };
+    const raw = m.row.name || null;
+    const t = teamFor(raw, dir.teams);
+    return { leadType: "mentor", ...none(m.by), ...mentorOf(t, teamCode(raw) ? null : raw) };
   }
   const s = find(subRows, email, phone);
   if (s) {
-    const d = decodeMentor(s.row.mentor, teams);
-    return { leadType: "sub_mentor", mentorName: d.closed ? null : d.name, mentorTeam: d.team, subMentorName: s.row.name || null, matchedBy: s.by };
+    const sub = findSubMentor(s.row.name, dir.subMentors);
+    // The team from the sheet's Mentor column, or else the sub-mentor's team in the directory.
+    const t = teamFor(s.row.mentor, dir.teams) ?? (sub ? teamFor(sub.team, dir.teams) : null);
+    return {
+      leadType: "sub_mentor",
+      ...none(s.by),
+      ...mentorOf(t, s.row.mentor && !teamCode(s.row.mentor) ? s.row.mentor : null),
+      subMentorName: s.row.name || sub?.name || null,
+      subMentorPhone: sub?.phone || null,
+      subMentorEmail: sub?.email || null,
+    };
   }
-  return { leadType: "none", mentorName: null, mentorTeam: null, subMentorName: null, matchedBy: null };
+  return { leadType: "none", ...none() };
 }
 
 /** The payload sent on: the same fields for every result, so they're mapped once in Pabbly. */
@@ -255,7 +296,11 @@ export function lookupPayload(r: LookupResult, lead: { name?: string | null; ema
     phone: lead.phone ?? "",
     mentor_name: r.mentorName ?? "",
     mentor_team: r.mentorTeam ?? "",
+    mentor_phone: r.mentorPhone ?? "",
+    mentor_email: r.mentorEmail ?? "",
     sub_mentor_name: r.subMentorName ?? "",
+    sub_mentor_phone: r.subMentorPhone ?? "",
+    sub_mentor_email: r.subMentorEmail ?? "",
     matched_by: r.matchedBy ?? "",
     source,
     checked_at: new Date(at.getTime() + 330 * 60_000).toISOString().replace("Z", "+05:30").replace(/\.\d{3}/, ""),
@@ -319,7 +364,7 @@ export async function lookupAndLog(input: { name: string | null; email: string |
   const cfg = await config();
   if (!ready(cfg)) throw new Error(cfg.enabled ? "Lead lookup isn't set up yet: add the Mentor and Sub-mentor sheets first." : "Lead lookup is switched off.");
   const [m, s] = await Promise.all([freshRows(cfg, "mentor"), freshRows(cfg, "subMentor")]);
-  const r = matchLead(m, s, input, parseTeams(cfg.teamNames));
+  const r = matchLead(m, s, input, directoryOf(cfg));
   const payload = withExtra(lookupPayload(r, input, source), input.extra);
   const hasOut = Boolean(cfg.outboundConfig);
   const row = await prisma.leadLookup.create({
@@ -428,11 +473,16 @@ export async function deliverLookup(lookupId: string) {
   if (!res.ok) throw new Error(`Lookup webhook failed: ${res.error}`);
 }
 
-const TEST_RESULTS: Record<LeadType, LookupResult> = {
-  mentor: { leadType: "mentor", mentorName: "Anupa", mentorTeam: "A", subMentorName: null, matchedBy: "email" },
-  sub_mentor: { leadType: "sub_mentor", mentorName: "Jesal", mentorTeam: "C", subMentorName: "Test Sub-mentor", matchedBy: "phone" },
-  none: { leadType: "none", mentorName: null, mentorTeam: null, subMentorName: null, matchedBy: null },
-};
+/** Sample results for Send test, using the first open team and its first sub-mentor from the directory. */
+function testResult(leadType: LeadType, dir: Directory): LookupResult {
+  const blank = { leadType, mentorName: null, mentorTeam: null, mentorPhone: null, mentorEmail: null, subMentorName: null, subMentorPhone: null, subMentorEmail: null, matchedBy: null };
+  if (leadType === "none") return blank;
+  const sub = dir.subMentors.find((x) => dir.teams.some((t) => t.code === x.team && !t.closed));
+  const team = (leadType === "sub_mentor" && sub ? dir.teams.find((t) => t.code === sub.team) : null) ?? dir.teams.find((t) => !t.closed);
+  const mentor = { mentorName: team?.mentor || "Test Mentor", mentorTeam: team?.code ?? "A", mentorPhone: team?.phone || DUMMY_MENTOR_PHONE, mentorEmail: team?.email || null };
+  if (leadType === "mentor") return { ...blank, ...mentor, matchedBy: "email" };
+  return { ...blank, ...mentor, subMentorName: sub?.name ?? "Test Sub-mentor", subMentorPhone: sub?.phone || "9000000001", subMentorEmail: sub?.email || "sub.mentor@example.com", matchedBy: "phone" };
+}
 
 /**
  * Sends a sample result to the saved outbound webhook right now (not queued, not retried), so its fields
@@ -442,7 +492,7 @@ export async function sendLookupTest(ctx: Ctx, leadType: LeadType) {
   assertAdmin(ctx);
   const url = outboundUrl(await config());
   if (!url) throw new Error("Save your webhook URL in Settings first.");
-  const payload = { ...lookupPayload(TEST_RESULTS[leadType] ?? TEST_RESULTS.none, { name: "Test Lead", email: "test.lead@example.com", phone: "+91 90000 00000" }, "panel"), source: "test", test: true, type: "Test type" };
+  const payload = { ...lookupPayload(testResult(leadType, directoryOf(await config())), { name: "Test Lead", email: "test.lead@example.com", phone: "+91 90000 00000" }, "panel"), source: "test", test: true, type: "Test type" };
   const res = await postJson(url, payload, { keepResponse: true });
   await logWebhook({ status: res.ok ? "sent" : "failed", test: true, httpStatus: res.status, body: payload, response: res.response, error: res.error, durationMs: res.durationMs });
   await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.test_send", target: leadType } });
@@ -461,7 +511,7 @@ export async function getLookupSetup(ctx: Ctx) {
   return { cfg, outboundUrl: outboundUrl(cfg) };
 }
 
-export async function saveLookupConfig(ctx: Ctx, input: { outboundUrl: string; refreshMinutes: number; enabled: boolean; autoCheckLeads?: boolean; teamNames?: string }) {
+export async function saveLookupConfig(ctx: Ctx, input: { outboundUrl: string; refreshMinutes: number; enabled: boolean; autoCheckLeads?: boolean }) {
   assertAdmin(ctx);
   const out = input.outboundUrl.trim();
   if (out) {
@@ -476,10 +526,30 @@ export async function saveLookupConfig(ctx: Ctx, input: { outboundUrl: string; r
       refreshMinutes: Math.min(60, Math.max(1, Math.round(input.refreshMinutes || 2))),
       enabled: input.enabled,
       autoCheckLeads: Boolean(input.autoCheckLeads),
-      ...(input.teamNames !== undefined ? { teamNames: input.teamNames.trim().slice(0, 2000) } : {}),
     },
   });
   await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.settings", target: "global" } });
+}
+
+/** Saves the teams (letter → mentor and contact) and sub-mentors (name → team and contact). */
+export async function saveDirectory(ctx: Ctx, input: { teams: unknown; subMentors: unknown }) {
+  assertAdmin(ctx);
+  const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const teamText = (v: unknown) => text(v, 20).toUpperCase().replace(/^TEAM\s*[-_ ]?\s*/, "").slice(0, 3);
+  const teams = asList<Record<string, unknown>>(input.teams)
+    .map((t) => ({ code: teamText(t.code), mentor: text(t.mentor, 120), phone: text(t.phone, 40), email: text(t.email, 200), closed: Boolean(t.closed) }))
+    .filter((t) => t.code);
+  const subMentors = asList<Record<string, unknown>>(input.subMentors)
+    .map((x) => ({ name: text(x.name, 120), team: teamText(x.team), phone: text(x.phone, 40), email: text(x.email, 200) }))
+    .filter((x) => x.name);
+  const dup = teams.find((t, i) => teams.findIndex((u) => u.code === t.code) !== i);
+  if (dup) throw new Error(`Team ${dup.code} is listed twice.`);
+  const unknown = subMentors.find((x) => x.team && !teams.some((t) => t.code === x.team));
+  if (unknown) throw new Error(`${unknown.name}: there is no Team ${unknown.team}.`);
+  if (teams.length > 50 || subMentors.length > 200) throw new Error("That's more teams or sub-mentors than allowed.");
+  await config();
+  await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { teams, subMentors } });
+  await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.directory", target: `${teams.length} teams, ${subMentors.length} sub-mentors` } });
 }
 
 /** Adds a Google Sheet link to a list and reads it straight away. Returns its rows and any problem reading it. */

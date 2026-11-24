@@ -58,30 +58,59 @@ describe("lead lookup: rules", () => {
     const m = readSheetRows(MENTOR_CSV, "mentor");
     const s = readSheetRows(SUB_CSV, "subMentor");
     const r = (lead: { email?: string; phone?: string }) => matchLead(m, s, lead);
-    expect(r({ email: "  ASHA.verma@example.com " })).toEqual({ leadType: "mentor", mentorName: "Anil Kapoor", mentorTeam: null, subMentorName: null, matchedBy: "email" });
+    const blank = { mentorTeam: null, mentorPhone: null, mentorEmail: null, subMentorPhone: null, subMentorEmail: null };
+    expect(r({ email: "  ASHA.verma@example.com " })).toEqual({ leadType: "mentor", mentorName: "Anil Kapoor", subMentorName: null, matchedBy: "email", ...blank });
     expect(r({ phone: "098765-43210" })).toMatchObject({ leadType: "mentor", matchedBy: "phone" });
-    expect(r({ phone: "+91 70000 00002" })).toEqual({ leadType: "sub_mentor", mentorName: "Anil Kapoor", mentorTeam: null, subMentorName: "Vikram Singh", matchedBy: "phone" });
-    expect(r({ email: "nobody@example.com", phone: "9111111111" })).toEqual({ leadType: "none", mentorName: null, mentorTeam: null, subMentorName: null, matchedBy: null });
+    expect(r({ phone: "+91 70000 00002" })).toEqual({ leadType: "sub_mentor", mentorName: "Anil Kapoor", subMentorName: "Vikram Singh", matchedBy: "phone", ...blank });
+    expect(r({ email: "nobody@example.com", phone: "9111111111" })).toEqual({ leadType: "none", mentorName: null, subMentorName: null, matchedBy: null, ...blank });
     // In both sheets: Mentor's lead, and the Sub-mentor sheet isn't checked.
-    expect(r({ email: "both@example.com" })).toEqual({ leadType: "mentor", mentorName: "Neha Rao", mentorTeam: null, subMentorName: null, matchedBy: "email" });
+    expect(r({ email: "both@example.com" })).toEqual({ leadType: "mentor", mentorName: "Neha Rao", subMentorName: null, matchedBy: "email", ...blank });
   });
 
-  it("team letters in the Mentor sheet become names; a closed team (D) is never routed to", async () => {
-    const { matchLead, parseTeams, readSheetRows, teamCode, DEFAULT_TEAMS } = await import("@/lib/lookup");
+  it("team letters become mentors with their contact; sub-mentors get their team and contact; Team D is never routed to", async () => {
+    const { matchLead, readSheetRows, teamCode, findSubMentor, DEFAULT_TEAMS } = await import("@/lib/lookup");
     expect(["A", "Team B", "team-c", " TEAM g ", "Anupa"].map(teamCode)).toEqual(["A", "B", "C", "G", null]);
-    const teams = parseTeams(DEFAULT_TEAMS);
-    expect([teams.get("A"), teams.get("D"), teams.get("G")]).toEqual(["Anupa", null, "Sweety"]);
+    const teams = DEFAULT_TEAMS.map((t) => (t.code === "F" ? { ...t, phone: "9811111111", email: "shobhita@example.com" } : t));
+    const subMentors = [
+      { name: "Sudeshna Chatterjee", team: "A", phone: "9800000010", email: "sudeshna@example.com" },
+      { name: "Arpan Bagga Sahay", team: "G", phone: "9800000011", email: "arpan@example.com" },
+      { name: "Dr. Shuchita Mittal", team: "F", phone: "9800000012", email: "shuchita@example.com" },
+    ];
+    const dir = { teams, subMentors };
+    // Loose name matching: case, "Dr." and a missing surname don't matter.
+    expect(findSubMentor("Arpan Bagga", subMentors)?.team).toBe("G");
+    expect(findSubMentor("shuchita mittal", subMentors)?.team).toBe("F");
+    expect(findSubMentor("Arpan", subMentors)).toBeNull(); // one word is too little
+
     const m = readSheetRows("Name,Mobile,Team\nX,9800000001,Team A\nY,9800000002,D\nZ,9800000003,F\nW,9800000004,Ravi\n", "mentor");
-    const s = readSheetRows("Phone,Sub Mentor Name,Mentor Name\n9800000002,Karan Shah,Team C\n", "subMentor");
-    const r = (phone: string) => matchLead(m, s, { phone }, teams);
-    expect(r("9800000001")).toMatchObject({ leadType: "mentor", mentorName: "Anupa", mentorTeam: "A" });
-    expect(r("9800000003")).toMatchObject({ leadType: "mentor", mentorName: "Shobhita", mentorTeam: "F" });
-    expect(r("9800000004")).toMatchObject({ leadType: "mentor", mentorName: "Ravi", mentorTeam: null }); // a name stays as it is
-    // Team D: skipped, so the Sub-mentor sheet decides (its Mentor Name "Team C" is decoded too).
-    expect(r("9800000002")).toMatchObject({ leadType: "sub_mentor", subMentorName: "Karan Shah", mentorName: "Jesal", mentorTeam: "C" });
-    expect(matchLead(m, [], { phone: "9800000002" }, teams).leadType).toBe("none");
-    // The list is editable: a renamed team takes effect.
-    expect(matchLead(m, s, { phone: "9800000001" }, parseTeams("A: Asha\nTeam D - closed")).mentorName).toBe("Asha");
+    const s = readSheetRows("Phone,Sub Mentor Name,Mentor Name\n9800000002,Sudeshna Chatterjee,\n9800000005,Arpan Bagga,\n9800000006,Unknown Person,Team C\n", "subMentor");
+    const r = (phone: string) => matchLead(m, s, { phone }, dir);
+    expect(r("9800000001")).toMatchObject({ leadType: "mentor", mentorName: "Anupa", mentorTeam: "A", mentorPhone: "0000000000", subMentorPhone: null });
+    expect(r("9800000003")).toMatchObject({ leadType: "mentor", mentorName: "Shobhita", mentorTeam: "F", mentorPhone: "9811111111", mentorEmail: "shobhita@example.com" });
+    expect(r("9800000004")).toMatchObject({ leadType: "mentor", mentorName: "Ravi", mentorTeam: null, mentorPhone: null }); // a name stays as it is
+    // Team D: skipped, so the Sub-mentor sheet decides. The sub-mentor's team gives the mentor.
+    expect(r("9800000002")).toEqual({
+      leadType: "sub_mentor", matchedBy: "phone",
+      mentorName: "Anupa", mentorTeam: "A", mentorPhone: "0000000000", mentorEmail: null,
+      subMentorName: "Sudeshna Chatterjee", subMentorPhone: "9800000010", subMentorEmail: "sudeshna@example.com",
+    });
+    expect(r("9800000005")).toMatchObject({ mentorName: "Sweety", mentorTeam: "G", subMentorName: "Arpan Bagga", subMentorPhone: "9800000011" });
+    expect(r("9800000006")).toMatchObject({ mentorName: "Jesal", mentorTeam: "C", subMentorName: "Unknown Person", subMentorPhone: null });
+    expect(matchLead(m, [], { phone: "9800000002" }, dir).leadType).toBe("none");
+  });
+
+  it("the teams and sub-mentors list is saved, checked and sent with results", async () => {
+    await resetDb();
+    const admin = await makeUser("SUPER_ADMIN", null);
+    const { saveDirectory, getLookupSetup, directoryOf } = await import("@/lib/lookup");
+    expect(directoryOf((await getLookupSetup(admin)).cfg).teams.map((t) => [t.code, t.closed])).toEqual([["A", false], ["B", false], ["C", false], ["D", true], ["E", false], ["F", false], ["G", false]]);
+    const teams = [{ code: "team a", mentor: "Anupa", phone: "9", email: "", closed: false }];
+    await saveDirectory(admin, { teams, subMentors: [{ name: " Sonal Fozdar ", team: "A", phone: "9594609707", email: "s@example.com" }, { name: "", team: "A" }] });
+    expect(directoryOf((await getLookupSetup(admin)).cfg)).toEqual({ teams: [{ code: "A", mentor: "Anupa", phone: "9", email: "", closed: false }], subMentors: [{ name: "Sonal Fozdar", team: "A", phone: "9594609707", email: "s@example.com" }] });
+    await expect(saveDirectory(admin, { teams, subMentors: [{ name: "X", team: "Z" }] })).rejects.toThrow(/no Team Z/);
+    await expect(saveDirectory(admin, { teams: [...teams, ...teams], subMentors: [] })).rejects.toThrow(/twice/);
+    const { client } = await makeClient("alpha");
+    await expect(saveDirectory(await makeUser("CLIENT_ADMIN", client.id), { teams, subMentors: [] })).rejects.toThrow();
   });
 
   it("API input: alternative names; no email and no phone is refused", async () => {
@@ -206,7 +235,7 @@ describe("lead lookup: global webhook in, your webhook out", () => {
     fakeNet({ mentor: MENTOR_CSV, sub: SUB_CSV }, 200);
     const t = await sendLookupTest(admin, "sub_mentor");
     expect(t.ok).toBe(true);
-    expect(pabbly.at(-1)?.body).toMatchObject({ test: true, source: "test", lead_type: "sub_mentor", mentor_name: "Jesal", mentor_team: "C" });
+    expect(pabbly.at(-1)?.body).toMatchObject({ test: true, source: "test", lead_type: "sub_mentor", mentor_name: "Anupa", mentor_team: "A", mentor_phone: "0000000000", sub_mentor_name: "Test Sub-mentor", sub_mentor_phone: expect.any(String) });
     const sent = (await webhookHistory(admin, "sent")).rows[0];
     expect([sent.test, sent.httpStatus]).toEqual([true, 200]);
     await prisma.lookupConfig.update({ where: { id: "global" }, data: { outboundConfig: null } });

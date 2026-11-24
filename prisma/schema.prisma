@@ -120,8 +120,11 @@ model LookupConfig {
   subMentorFiles    Json      @default("[]") @map("sub_mentor_files")
   /// Also check every new lead that arrives in SD-Leads (any client) and send the result on.
   autoCheckLeads    Boolean   @default(false) @map("auto_check_leads")
-  /// Team letters in the Mentor sheet → mentor names, one "A = Anupa" per line; "D = closed" is never routed to.
-  teamNames         String    @default("A = Anupa\nB = Varsha\nC = Jesal\nD = closed\nE = Poonam\nF = Shobhita\nG = Sweety") @map("team_names")
+  /// Mentor teams: [{ code, mentor, phone, email, closed }]. The Mentor sheet uses the team letter; a closed
+  /// team (e.g. D) never gets leads. Mentor phone / email are sent with each result.
+  teams             Json      @default("[{\"code\":\"A\",\"mentor\":\"Anupa\",\"phone\":\"0000000000\",\"email\":\"\",\"closed\":false},{\"code\":\"B\",\"mentor\":\"Varsha\",\"phone\":\"0000000000\",\"email\":\"\",\"closed\":false},{\"code\":\"C\",\"mentor\":\"Jesal\",\"phone\":\"0000000000\",\"email\":\"\",\"closed\":false},{\"code\":\"D\",\"mentor\":\"\",\"phone\":\"\",\"email\":\"\",\"closed\":true},{\"code\":\"E\",\"mentor\":\"Poonam\",\"phone\":\"0000000000\",\"email\":\"\",\"closed\":false},{\"code\":\"F\",\"mentor\":\"Shobhita\",\"phone\":\"0000000000\",\"email\":\"\",\"closed\":false},{\"code\":\"G\",\"mentor\":\"Sweety\",\"phone\":\"0000000000\",\"email\":\"\",\"closed\":false}]")
+  /// Sub-mentors: [{ name, team, phone, email }], matched to the Sub-mentor sheet by name.
+  subMentors        Json      @default("[]") @map("sub_mentors")
   /// Secret in the inbound webhook URL: /api/lookup/{apiToken}
   apiToken          String    @unique @map("api_token")
   /// Where results are sent after each lookup (AES-256-GCM encrypted JSON { url }).

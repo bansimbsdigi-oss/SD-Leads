@@ -1,13 +1,13 @@
-import { ArrowDownToLine, ArrowUpFromLine, FileSpreadsheet, History, Search, Send, Table2 } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, FileSpreadsheet, History, Search, Send, Table2, Users } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { rotateLookupTokenAction, saveLookupConfigAction, sendLookupTestAction } from "@/app/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { CopyBox } from "@/components/CopyBox";
-import { LookupCheck, LookupSheets, ResendLookupButton } from "@/components/LeadLookupPanel";
-import { Badge, Button, buttonClass, Card, Empty, Field, Input, PageHeader, Select, tableClass, Textarea, type Tone } from "@/components/ui";
+import { LookupCheck, LookupDirectory, LookupSheets, ResendLookupButton } from "@/components/LeadLookupPanel";
+import { Badge, Button, buttonClass, Card, Empty, Field, Input, PageHeader, Select, tableClass, type Tone } from "@/components/ui";
 import { formatDateTime } from "@/lib/leadColumns";
-import { getLookupSetup, LOG_FILTERS, recentLookups, sheetStatus, webhookHistory, type LogFilter } from "@/lib/lookup";
+import { directoryOf, getLookupSetup, LOG_FILTERS, recentLookups, sheetStatus, webhookHistory, type LogFilter } from "@/lib/lookup";
 import { LEAD_TYPE_LABEL, type LeadType } from "@/lib/lookupLabels";
 import { requireCtx } from "@/lib/session";
 
@@ -50,7 +50,11 @@ const SAMPLE = `{
   "phone": "+91-7000000002",
   "mentor_name": "Anupa",
   "mentor_team": "A",
-  "sub_mentor_name": "Vikram Singh",
+  "mentor_phone": "0000000000",
+  "mentor_email": "",
+  "sub_mentor_name": "Sudeshna Chatterjee",
+  "sub_mentor_phone": "98000 00000",
+  "sub_mentor_email": "mentor.sudeshna@example.com",
   "matched_by": "phone",
   "checked_at": "2026-11-23T17:31:11+05:30",
   "type": "…whatever you sent in type"
@@ -91,6 +95,10 @@ export default async function LeadLookupPage({ searchParams }: { searchParams: S
 
           <Card title={<span className="flex items-center gap-2"><FileSpreadsheet aria-hidden className="size-4 text-brand-700" /> 2. Sheets</span>} description="Add each Google Sheet to its list, e.g. two Mentor sheets and one Sub-mentor sheet. All sheets of a list are searched together, and they are re-read automatically, so changes in Google Sheets are picked up within a few minutes.">
             <LookupSheets sheets={sheets} />
+          </Card>
+
+          <Card title={<span className="flex items-center gap-2"><Users aria-hidden className="size-4 text-brand-700" /> Teams and sub-mentors</span>} description="Who each team letter is, and each sub-mentor's team. Their phone and email are sent with every result (mentor_phone, mentor_email, sub_mentor_phone, sub_mentor_email). Sub-mentors are matched to the Sub-mentor sheet by name.">
+            <LookupDirectory initial={directoryOf(cfg)} />
           </Card>
 
           <Card title={<span className="flex items-center gap-2"><Search aria-hidden className="size-4 text-brand-700" /> Check a lead</span>} description="Email is tried first, then the last 10 digits of the phone. Mentor sheet first.">
@@ -189,9 +197,6 @@ export default async function LeadLookupPage({ searchParams }: { searchParams: S
             <ActionForm action={saveLookupConfigAction} className="space-y-4">
               <Field label="3. Your webhook (results are sent here)" htmlFor="lk-out" hint="E.g. your Pabbly webhook URL. Every lookup from the webhook above is sent here with event = lead_lookup.">
                 <Input id="lk-out" name="outboundUrl" defaultValue={outboundUrl ?? ""} placeholder="https://connect.pabbly.com/workflow/sendwebhookdata/…" />
-              </Field>
-              <Field label="Mentor teams" htmlFor="lk-teams" hint="When the Mentor sheet says a team (A, Team B, …) instead of a name, it's sent as this mentor's name. One per line, e.g. A = Anupa. Write “closed” for a team that must never get leads: its rows are skipped and the lead goes on to the Sub-mentor sheet.">
-                <Textarea id="lk-teams" name="teamNames" rows={7} defaultValue={cfg.teamNames} className="font-mono text-xs" />
               </Field>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Re-read sheets every (min)" htmlFor="lk-refresh">

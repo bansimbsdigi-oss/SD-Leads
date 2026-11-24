@@ -1,11 +1,11 @@
 "use client";
 
-import { FileSpreadsheet, FileUp, Link2, RefreshCw, Search, Send, TriangleAlert, X } from "lucide-react";
+import { FileSpreadsheet, FileUp, Link2, Plus, RefreshCw, Save, Search, Send, TriangleAlert, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { addSheetLinkAction, checkLeadByHandAction, reloadSheetsAction, removeSheetFileAction, removeSheetLinkAction, resendLookupAction, uploadSheetAction } from "@/app/actions";
+import { addSheetLinkAction, checkLeadByHandAction, saveDirectoryAction, reloadSheetsAction, removeSheetFileAction, removeSheetLinkAction, resendLookupAction, uploadSheetAction } from "@/app/actions";
 import { ActionForm } from "@/components/ActionForm";
-import { Badge, Button, Field, Input, type Tone } from "@/components/ui";
+import { Badge, Button, Field, Input, Select, type Tone } from "@/components/ui";
 
 const TYPE_TONE: Record<string, Tone> = { mentor: "green", sub_mentor: "violet", none: "slate" };
 
@@ -176,5 +176,84 @@ export function ResendLookupButton({ id }: { id: string }) {
     })}>
       <Send aria-hidden /> Send
     </Button>
+  );
+}
+
+type Team = { code: string; mentor: string; phone: string; email: string; closed: boolean };
+type Sub = { name: string; team: string; phone: string; email: string };
+
+const cell = "h-8 px-2 text-xs";
+
+/** Teams (letter → mentor and contact) and sub-mentors (name → team and contact), edited in place. */
+export function LookupDirectory({ initial }: { initial: { teams: Team[]; subMentors: Sub[] } }) {
+  const router = useRouter();
+  const [teams, setTeams] = useState<Team[]>(initial.teams);
+  const [subs, setSubs] = useState<Sub[]>(initial.subMentors);
+  const [msg, setMsg] = useState<{ ok?: string; error?: string } | null>(null);
+  const [pending, startTransition] = useTransition();
+  const setTeam = (i: number, patch: Partial<Team>) => { setTeams(teams.map((t, j) => (j === i ? { ...t, ...patch } : t))); setMsg(null); };
+  const setSub = (i: number, patch: Partial<Sub>) => { setSubs(subs.map((t, j) => (j === i ? { ...t, ...patch } : t))); setMsg(null); };
+  const remove = (label: string) => `Remove ${label}?`;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <p className="mb-2 text-sm font-semibold">Mentor teams</p>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead><tr className="text-left text-xs text-ink-muted"><th className="w-16 pb-1 font-medium">Team</th><th className="pb-1 font-medium">Mentor</th><th className="pb-1 font-medium">Phone</th><th className="pb-1 font-medium">Email</th><th className="w-16 pb-1 font-medium">Closed</th><th className="w-8" /></tr></thead>
+            <tbody>
+              {teams.map((t, i) => (
+                <tr key={i} className={t.closed ? "opacity-60" : undefined}>
+                  <td className="py-0.5 pr-1.5"><Input aria-label="Team letter" value={t.code} onChange={(e) => setTeam(i, { code: e.target.value.toUpperCase() })} className={`${cell} w-14 text-center font-semibold`} /></td>
+                  <td className="py-0.5 pr-1.5"><Input aria-label={`Team ${t.code} mentor`} value={t.mentor} onChange={(e) => setTeam(i, { mentor: e.target.value })} className={cell} /></td>
+                  <td className="py-0.5 pr-1.5"><Input aria-label={`Team ${t.code} mentor phone`} value={t.phone} onChange={(e) => setTeam(i, { phone: e.target.value })} inputMode="tel" className={cell} /></td>
+                  <td className="py-0.5 pr-1.5"><Input aria-label={`Team ${t.code} mentor email`} value={t.email} onChange={(e) => setTeam(i, { email: e.target.value })} className={cell} /></td>
+                  <td className="py-0.5 text-center"><input type="checkbox" aria-label={`Team ${t.code} closed`} checked={t.closed} onChange={(e) => setTeam(i, { closed: e.target.checked })} className="size-4" /></td>
+                  <td className="py-0.5"><button type="button" aria-label={`Remove team ${t.code}`} onClick={() => confirm(remove(`Team ${t.code}`)) && setTeams(teams.filter((_, j) => j !== i))} className="rounded p-1 text-ink-muted hover:bg-slate-200 hover:text-red-700"><X aria-hidden className="size-3.5" /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Button type="button" variant="ghost" size="sm" className="mt-1" onClick={() => setTeams([...teams, { code: "", mentor: "", phone: "", email: "", closed: false }])}><Plus aria-hidden /> Add team</Button>
+        <p className="text-[11px] text-ink-muted">A closed team never gets leads: its rows in the Mentor sheet are skipped and the lead goes on to the Sub-mentor sheet. 0000000000 is a placeholder phone; replace it when you have the real number.</p>
+      </div>
+
+      <div>
+        <p className="mb-2 text-sm font-semibold">Sub-mentors</p>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead><tr className="text-left text-xs text-ink-muted"><th className="pb-1 font-medium">Name (as in the Sub-mentor sheet)</th><th className="w-24 pb-1 font-medium">Team</th><th className="pb-1 font-medium">Phone</th><th className="pb-1 font-medium">Email</th><th className="w-8" /></tr></thead>
+            <tbody>
+              {subs.map((x, i) => (
+                <tr key={i}>
+                  <td className="py-0.5 pr-1.5"><Input aria-label="Sub-mentor name" value={x.name} onChange={(e) => setSub(i, { name: e.target.value })} className={cell} /></td>
+                  <td className="py-0.5 pr-1.5">
+                    <Select aria-label={`${x.name || "Sub-mentor"} team`} value={x.team} onChange={(e) => setSub(i, { team: e.target.value })} className={`${cell} w-full`}>
+                      <option value="">—</option>
+                      {teams.filter((t) => t.code).map((t) => <option key={t.code} value={t.code}>Team {t.code}</option>)}
+                    </Select>
+                  </td>
+                  <td className="py-0.5 pr-1.5"><Input aria-label={`${x.name || "Sub-mentor"} phone`} value={x.phone} onChange={(e) => setSub(i, { phone: e.target.value })} inputMode="tel" className={cell} /></td>
+                  <td className="py-0.5 pr-1.5"><Input aria-label={`${x.name || "Sub-mentor"} email`} value={x.email} onChange={(e) => setSub(i, { email: e.target.value })} className={cell} /></td>
+                  <td className="py-0.5"><button type="button" aria-label={`Remove ${x.name || "sub-mentor"}`} onClick={() => confirm(remove(x.name || "this sub-mentor")) && setSubs(subs.filter((_, j) => j !== i))} className="rounded p-1 text-ink-muted hover:bg-slate-200 hover:text-red-700"><X aria-hidden className="size-3.5" /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {subs.length === 0 && <p className="text-xs text-ink-muted">No sub-mentors yet.</p>}
+        <Button type="button" variant="ghost" size="sm" className="mt-1" onClick={() => setSubs([...subs, { name: "", team: "", phone: "", email: "" }])}><Plus aria-hidden /> Add sub-mentor</Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 border-t border-line pt-3">
+        <Button type="button" disabled={pending} onClick={() => startTransition(async () => { const r = await saveDirectoryAction({ teams, subMentors: subs }); setMsg(r); if (r.ok) router.refresh(); })}>
+          <Save aria-hidden /> {pending ? "Saving…" : "Save teams and sub-mentors"}
+        </Button>
+        {msg?.ok && <span role="status" className="text-sm text-emerald-700">{msg.ok}</span>}
+        {msg?.error && <span role="alert" className="text-sm text-red-700">{msg.error}</span>}
+      </div>
+    </div>
   );
 }
