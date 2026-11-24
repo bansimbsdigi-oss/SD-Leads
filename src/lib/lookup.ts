@@ -269,12 +269,21 @@ const ready = (cfg: Config) =>
 
 export class LookupInputError extends Error {}
 
-/** Picks name / email / phone out of a JSON or form body, accepting common alternative names. */
+/**
+ * Picks name / email / phone out of a JSON or form body, accepting common alternative names. Every other
+ * field sent (e.g. "type") is kept in `extra` and passed on to your webhook unchanged.
+ */
 export function lookupInput(body: Record<string, unknown>) {
+  const used = new Set<string>();
   const pick = (...keys: string[]) => {
     for (const k of keys) {
-      const v = body[k] ?? body[k.toLowerCase()];
-      if ((typeof v === "string" && v.trim()) || typeof v === "number") return String(v).trim();
+      for (const key of [k, k.toLowerCase()]) {
+        const v = body[key];
+        if ((typeof v === "string" && v.trim()) || typeof v === "number") {
+          used.add(key);
+          return String(v).trim();
+        }
+      }
     }
     return "";
   };
@@ -282,7 +291,21 @@ export function lookupInput(body: Record<string, unknown>) {
   const email = pick("email", "Email", "email_address", "email_id", "mail");
   const phone = pick("phone", "Phone", "mobile", "phone_number", "mobile_number", "whatsapp", "whatsapp_number", "contact", "number");
   if (!emailKey(email) && !phoneKey(phone)) throw new LookupInputError("Send an email or a phone number.");
-  return { name: name.slice(0, 200) || null, email: email.slice(0, 200) || null, phone: phone.slice(0, 40) || null };
+  const extra = Object.fromEntries(
+    Object.entries(body)
+      .filter(([k, v]) => !used.has(k) && !/^(name|email|phone)$/i.test(k) && v !== undefined)
+      .slice(0, 50)
+      .map(([k, v]) => [k.slice(0, 100), typeof v === "string" ? v.slice(0, 2000) : v]),
+  );
+  return { name: name.slice(0, 200) || null, email: email.slice(0, 200) || null, phone: phone.slice(0, 40) || null, extra };
+}
+
+/** Our result fields plus the extra fields sent in; an extra field with the same name as ours is sent as input_<name>. */
+function withExtra<T extends Record<string, unknown>>(payload: T, extra?: Record<string, unknown>) {
+  if (!extra) return payload;
+  const out: Record<string, unknown> = { ...payload };
+  for (const [k, v] of Object.entries(extra)) out[k in payload ? `input_${k}` : k] = v;
+  return out as T;
 }
 
 /** The inbound webhook's secret token, or null when it isn't this one. */
@@ -292,19 +315,19 @@ export async function lookupTokenMatches(token: string) {
 }
 
 /** Looks up a lead, saves it and (when `send` and an outbound webhook is set) queues it to be sent. */
-export async function lookupAndLog(input: { name: string | null; email: string | null; phone: string | null; clientId?: string; leadId?: string }, source: "webhook" | "panel" | "lead", send: boolean) {
+export async function lookupAndLog(input: { name: string | null; email: string | null; phone: string | null; extra?: Record<string, unknown>; clientId?: string; leadId?: string }, source: "webhook" | "panel" | "lead", send: boolean) {
   const cfg = await config();
   if (!ready(cfg)) throw new Error(cfg.enabled ? "Lead lookup isn't set up yet: add the Mentor and Sub-mentor sheets first." : "Lead lookup is switched off.");
   const [m, s] = await Promise.all([freshRows(cfg, "mentor"), freshRows(cfg, "subMentor")]);
   const r = matchLead(m, s, input, parseTeams(cfg.teamNames));
-  const payload = lookupPayload(r, input, source);
+  const payload = withExtra(lookupPayload(r, input, source), input.extra);
   const hasOut = Boolean(cfg.outboundConfig);
   const row = await prisma.leadLookup.create({
     data: {
       clientId: input.clientId ?? null,
       leadId: input.leadId ?? null,
       name: input.name, email: input.email, phone: input.phone, leadType: r.leadType, mentorName: r.mentorName,
-      subMentorName: r.subMentorName, matchedBy: r.matchedBy, source, payload,
+      subMentorName: r.subMentorName, matchedBy: r.matchedBy, source, payload: payload as Prisma.InputJsonValue,
       webhookStatus: send && hasOut ? "not_sent" : send ? "off" : "not_sent",
     },
   });
@@ -419,7 +442,7 @@ export async function sendLookupTest(ctx: Ctx, leadType: LeadType) {
   assertAdmin(ctx);
   const url = outboundUrl(await config());
   if (!url) throw new Error("Save your webhook URL in Settings first.");
-  const payload = { ...lookupPayload(TEST_RESULTS[leadType] ?? TEST_RESULTS.none, { name: "Test Lead", email: "test.lead@example.com", phone: "+91 90000 00000" }, "panel"), source: "test", test: true };
+  const payload = { ...lookupPayload(TEST_RESULTS[leadType] ?? TEST_RESULTS.none, { name: "Test Lead", email: "test.lead@example.com", phone: "+91 90000 00000" }, "panel"), source: "test", test: true, type: "Test type" };
   const res = await postJson(url, payload, { keepResponse: true });
   await logWebhook({ status: res.ok ? "sent" : "failed", test: true, httpStatus: res.status, body: payload, response: res.response, error: res.error, durationMs: res.durationMs });
   await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.test_send", target: leadType } });

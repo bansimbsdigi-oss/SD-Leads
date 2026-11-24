@@ -86,7 +86,10 @@ describe("lead lookup: rules", () => {
 
   it("API input: alternative names; no email and no phone is refused", async () => {
     const { lookupInput } = await import("@/lib/lookup");
-    expect(lookupInput({ full_name: "A", mobile: "+91 98765 43210" })).toEqual({ name: "A", email: null, phone: "+91 98765 43210" });
+    expect(lookupInput({ full_name: "A", mobile: "+91 98765 43210" })).toEqual({ name: "A", email: null, phone: "+91 98765 43210", extra: {} });
+    // Other fields are kept to be passed on (Pabbly sends Name / Email / Phone / type).
+    expect(lookupInput({ Name: "B", Email: "b@x.com", Phone: "9800000000", type: "Diamond" }).extra).toEqual({ type: "Diamond" });
+    expect(lookupInput({ email: "b@x.com", phone: "", whatsapp: "9800000000" }).extra).toEqual({});
     expect(() => lookupInput({ name: "Only a name" })).toThrow(/email or a phone/);
   });
 });
@@ -120,16 +123,16 @@ describe("lead lookup: global webhook in, your webhook out", () => {
     expect((await post("a".repeat(48), { email: "x@y.z" })).status).toBe(401);
     expect((await post(token, { name: "No contact" })).status).toBe(422);
 
-    const res = await post(token, { full_name: "Sameer Khan", mobile: "+91 70000 00002" });
+    const res = await post(token, { full_name: "Sameer Khan", mobile: "+91 70000 00002", type: "Diamond", source: "fb" });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toMatchObject({ event: "lead_lookup", lead_type: "sub_mentor", mentor_name: "Anil Kapoor", sub_mentor_name: "Vikram Singh", matched_by: "phone", source: "webhook", name: "Sameer Khan" });
+    expect(body).toMatchObject({ event: "lead_lookup", lead_type: "sub_mentor", mentor_name: "Anil Kapoor", sub_mentor_name: "Vikram Singh", matched_by: "phone", source: "webhook", name: "Sameer Khan", type: "Diamond", input_source: "fb" });
 
     const row = await prisma.leadLookup.findUniqueOrThrow({ where: { id: body.lookup_id } });
     expect([row.source, row.webhookStatus, row.clientId]).toEqual(["webhook", "not_sent", null]);
     await deliverLookup(row.id); // what the queue runs
     expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: row.id } })).webhookStatus).toBe("sent");
-    expect(pabbly.at(-1)?.body).toMatchObject({ event: "lead_lookup", lead_type: "sub_mentor", sub_mentor_name: "Vikram Singh" });
+    expect(pabbly.at(-1)?.body).toMatchObject({ event: "lead_lookup", lead_type: "sub_mentor", sub_mentor_name: "Vikram Singh", type: "Diamond", input_source: "fb" });
   });
 
   it("your webhook down: saved as failed; Send works once it's back", async () => {

@@ -52,7 +52,8 @@ const SAMPLE = `{
   "mentor_team": "A",
   "sub_mentor_name": "Vikram Singh",
   "matched_by": "phone",
-  "checked_at": "2026-11-23T17:31:11+05:30"
+  "checked_at": "2026-11-23T17:31:11+05:30",
+  "type": "…whatever you sent in type"
 }`;
 
 export default async function LeadLookupPage({ searchParams }: { searchParams: SP }) {
@@ -79,6 +80,7 @@ export default async function LeadLookupPage({ searchParams }: { searchParams: S
             <CopyBox value={inboundUrl} />
             <ul className="mt-3 space-y-1 text-xs text-ink-muted">
               <li>In Pabbly: <strong className="text-ink">API (Make a request)</strong> → <strong className="text-ink">POST</strong> → this URL → body <code className="font-mono">{`{ "name": …, "email": …, "phone": … }`}</code>. Also accepted: full_name, mobile, phone_number, whatsapp.</li>
+              <li>Any other field you send (e.g. <code className="font-mono">type</code>) is passed on to your webhook unchanged, next to the result.</li>
               <li>The reply has the result straight away, so the same Pabbly step can use it too.</li>
               <li>Wrong URL → 401. No email and no phone → 422. Keep the URL private.</li>
             </ul>
