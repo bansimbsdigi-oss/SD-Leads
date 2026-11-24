@@ -28,6 +28,10 @@ export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cx(field, "h-9 px-3", className)} {...props} />;
 }
 
+export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
+  return <textarea className={cx(field, "px-3 py-2", className)} {...props} />;
+}
+
 export function Select({ className, ...props }: ComponentProps<"select">) {
   return <select className={cx(field, "h-9 px-2.5", className)} {...props} />;
 }

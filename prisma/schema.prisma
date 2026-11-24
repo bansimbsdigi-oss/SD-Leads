@@ -120,6 +120,8 @@ model LookupConfig {
   subMentorFiles    Json      @default("[]") @map("sub_mentor_files")
   /// Also check every new lead that arrives in SD-Leads (any client) and send the result on.
   autoCheckLeads    Boolean   @default(false) @map("auto_check_leads")
+  /// Team letters in the Mentor sheet → mentor names, one "A = Anupa" per line; "D = closed" is never routed to.
+  teamNames         String    @default("A = Anupa\nB = Varsha\nC = Jesal\nD = closed\nE = Poonam\nF = Shobhita\nG = Sweety") @map("team_names")
   /// Secret in the inbound webhook URL: /api/lookup/{apiToken}
   apiToken          String    @unique @map("api_token")
   /// Where results are sent after each lookup (AES-256-GCM encrypted JSON { url }).

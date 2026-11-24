@@ -13,7 +13,7 @@ import { ForbiddenError, NotFoundError, type Ctx } from "@/lib/tenant";
 
 export type Sheet = "mentor" | "subMentor";
 export type SheetRow = { email: string | null; phone: string | null; name: string; mentor: string | null };
-export type LookupResult = { leadType: LeadType; mentorName: string | null; subMentorName: string | null; matchedBy: "email" | "phone" | null };
+export type LookupResult = { leadType: LeadType; mentorName: string | null; mentorTeam: string | null; subMentorName: string | null; matchedBy: "email" | "phone" | null };
 
 export { LEAD_TYPE_LABEL, type LeadType };
 
@@ -84,6 +84,8 @@ const PHONE_HEADERS = new Set([
   "contact", "contact number", "contact no", "number", "mob", "mob no", "cell",
 ]);
 const MENTOR_HEADERS = new Set(["mentor name", "mentor", "mentors name", "name of mentor"]);
+/** The Mentor sheet may hold a team letter instead of a name (decoded with the team list). */
+const TEAM_HEADERS = new Set(["team", "team name", "mentor team", "assigned team", "team assigned", "assign team", "team assign"]);
 const SUB_HEADERS = new Set(["sub mentor name", "submentor name", "sub mentor", "submentor", "sub mentors name", "name of sub mentor"]);
 
 /**
@@ -102,9 +104,9 @@ export function readSheetTable(rows: string[][], sheet: Sheet): SheetRow[] {
   const col = (names: Set<string>) => header.findIndex((h) => names.has(h));
   const email = col(EMAIL_HEADERS);
   const phone = col(PHONE_HEADERS);
-  const nameCol = sheet === "mentor" ? col(MENTOR_HEADERS) : col(SUB_HEADERS);
+  const nameCol = sheet === "mentor" ? (col(MENTOR_HEADERS) >= 0 ? col(MENTOR_HEADERS) : col(TEAM_HEADERS)) : col(SUB_HEADERS);
   const mentorCol = sheet === "subMentor" ? col(MENTOR_HEADERS) : -1;
-  if (nameCol < 0) throw new Error(sheet === "mentor" ? "No “Mentor Name” column found." : "No “Sub Mentor Name” column found.");
+  if (nameCol < 0) throw new Error(sheet === "mentor" ? "No “Mentor Name” (or “Team”) column found." : "No “Sub Mentor Name” column found.");
   return rows.slice(headerAt + 1).flatMap((r) => {
     const e = email >= 0 ? emailKey(r[email]) : null;
     const p = phone >= 0 ? phoneKey(r[phone]) : null;
@@ -190,18 +192,51 @@ function find(rows: SheetRow[], email: string | null, phone: string | null) {
   return byPhone ? { row: byPhone, by: "phone" as const } : null;
 }
 
+// ---------- Teams ----------
+
+export const DEFAULT_TEAMS = "A = Anupa\nB = Varsha\nC = Jesal\nD = closed\nE = Poonam\nF = Shobhita\nG = Sweety";
+export type Teams = Map<string, string | null>; // letter → mentor name, or null for a closed team
+
+/** "A = Anupa" per line (also "A: Anupa", "Team A - Anupa"); "closed" marks a team that is never routed to. */
+export function parseTeams(text: string): Teams {
+  const teams: Teams = new Map();
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*(?:team\s*)?([a-z0-9]{1,3})\s*[=:\-–]\s*(.+?)\s*$/i.exec(line);
+    if (m) teams.set(m[1].toUpperCase(), /^closed$/i.test(m[2]) ? null : m[2]);
+  }
+  return teams;
+}
+
+/** The team code in a cell like "A", "Team A", "team-a" or "TEAM A"; null for anything else (e.g. a name). */
+export const teamCode = (v: string | null | undefined) => /^\s*(?:team\s*[-_ ]?\s*)?([a-z0-9]{1,3})\s*$/i.exec(v ?? "")?.[1]?.toUpperCase() ?? null;
+
+/** A mentor cell → { name, team, closed }. A team code is looked up in the team list. */
+function decodeMentor(raw: string | null, teams: Teams) {
+  const code = teamCode(raw);
+  if (!code || !teams.has(code)) return { name: raw || null, team: null, closed: false };
+  const name = teams.get(code)!;
+  return { name, team: code, closed: name === null };
+}
+
 /**
  * The matching rules: the Mentor sheet first. Found there → Mentor's lead, and the Sub-mentor sheet isn't
  * checked. Otherwise the Sub-mentor sheet; otherwise None of the above.
  */
-export function matchLead(mentorRows: SheetRow[], subRows: SheetRow[], lead: { email?: unknown; phone?: unknown }): LookupResult {
+export function matchLead(mentorRows: SheetRow[], subRows: SheetRow[], lead: { email?: unknown; phone?: unknown }, teams: Teams = parseTeams(DEFAULT_TEAMS)): LookupResult {
   const email = emailKey(lead.email);
   const phone = phoneKey(lead.phone);
-  const m = find(mentorRows, email, phone);
-  if (m) return { leadType: "mentor", mentorName: m.row.name || null, subMentorName: null, matchedBy: m.by };
+  // Rows of a closed team (e.g. Team D) are never routed to: the lead goes on to the Sub-mentor sheet.
+  const m = find(mentorRows.filter((r) => !decodeMentor(r.name, teams).closed), email, phone);
+  if (m) {
+    const d = decodeMentor(m.row.name, teams);
+    return { leadType: "mentor", mentorName: d.name, mentorTeam: d.team, subMentorName: null, matchedBy: m.by };
+  }
   const s = find(subRows, email, phone);
-  if (s) return { leadType: "sub_mentor", mentorName: s.row.mentor, subMentorName: s.row.name || null, matchedBy: s.by };
-  return { leadType: "none", mentorName: null, subMentorName: null, matchedBy: null };
+  if (s) {
+    const d = decodeMentor(s.row.mentor, teams);
+    return { leadType: "sub_mentor", mentorName: d.closed ? null : d.name, mentorTeam: d.team, subMentorName: s.row.name || null, matchedBy: s.by };
+  }
+  return { leadType: "none", mentorName: null, mentorTeam: null, subMentorName: null, matchedBy: null };
 }
 
 /** The payload sent on: the same fields for every result, so they're mapped once in Pabbly. */
@@ -218,6 +253,7 @@ export function lookupPayload(r: LookupResult, lead: { name?: string | null; ema
     email: lead.email ?? "",
     phone: lead.phone ?? "",
     mentor_name: r.mentorName ?? "",
+    mentor_team: r.mentorTeam ?? "",
     sub_mentor_name: r.subMentorName ?? "",
     matched_by: r.matchedBy ?? "",
     source,
@@ -259,7 +295,7 @@ export async function lookupAndLog(input: { name: string | null; email: string |
   const cfg = await config();
   if (!ready(cfg)) throw new Error(cfg.enabled ? "Lead lookup isn't set up yet: add the Mentor and Sub-mentor sheets first." : "Lead lookup is switched off.");
   const [m, s] = await Promise.all([freshRows(cfg, "mentor"), freshRows(cfg, "subMentor")]);
-  const r = matchLead(m, s, input);
+  const r = matchLead(m, s, input, parseTeams(cfg.teamNames));
   const payload = lookupPayload(r, input, source);
   const hasOut = Boolean(cfg.outboundConfig);
   const row = await prisma.leadLookup.create({
@@ -315,7 +351,7 @@ export async function getLookupSetup(ctx: Ctx) {
   return { cfg, outboundUrl: outboundUrl(cfg) };
 }
 
-export async function saveLookupConfig(ctx: Ctx, input: { outboundUrl: string; refreshMinutes: number; enabled: boolean; autoCheckLeads?: boolean }) {
+export async function saveLookupConfig(ctx: Ctx, input: { outboundUrl: string; refreshMinutes: number; enabled: boolean; autoCheckLeads?: boolean; teamNames?: string }) {
   assertAdmin(ctx);
   const out = input.outboundUrl.trim();
   if (out) {
@@ -330,6 +366,7 @@ export async function saveLookupConfig(ctx: Ctx, input: { outboundUrl: string; r
       refreshMinutes: Math.min(60, Math.max(1, Math.round(input.refreshMinutes || 2))),
       enabled: input.enabled,
       autoCheckLeads: Boolean(input.autoCheckLeads),
+      ...(input.teamNames !== undefined ? { teamNames: input.teamNames.trim().slice(0, 2000) } : {}),
     },
   });
   await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.settings", target: "global" } });

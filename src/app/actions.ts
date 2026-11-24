@@ -347,6 +347,7 @@ export async function saveLookupConfigAction(_: ActionState, fd: FormData): Prom
       refreshMinutes: Number(str(fd, "refreshMinutes")) || 2,
       enabled: fd.get("enabled") === "on",
       autoCheckLeads: fd.get("autoCheckLeads") === "on",
+      teamNames: str(fd, "teamNames"),
     });
   } catch (err) {
     return { error: errorMessage(err) };

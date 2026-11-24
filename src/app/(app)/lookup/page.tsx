@@ -4,7 +4,7 @@ import { rotateLookupTokenAction, saveLookupConfigAction } from "@/app/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { CopyBox } from "@/components/CopyBox";
 import { LookupCheck, LookupSheets, ResendLookupButton } from "@/components/LeadLookupPanel";
-import { Badge, Button, Card, Empty, Field, Input, PageHeader, tableClass, type Tone } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, PageHeader, tableClass, Textarea, type Tone } from "@/components/ui";
 import { formatDateTime } from "@/lib/leadColumns";
 import { getLookupSetup, recentLookups, sheetStatus } from "@/lib/lookup";
 import { LEAD_TYPE_LABEL, type LeadType } from "@/lib/lookupLabels";
@@ -29,7 +29,8 @@ const SAMPLE = `{
   "name": "Sameer Khan",
   "email": "sameer@example.com",
   "phone": "+91-7000000002",
-  "mentor_name": "Anil Kapoor",
+  "mentor_name": "Anupa",
+  "mentor_team": "A",
   "sub_mentor_name": "Vikram Singh",
   "matched_by": "phone",
   "checked_at": "2026-11-23T17:31:11+05:30"
@@ -106,6 +107,9 @@ export default async function LeadLookupPage() {
             <ActionForm action={saveLookupConfigAction} className="space-y-4">
               <Field label="3. Your webhook (results are sent here)" htmlFor="lk-out" hint="E.g. your Pabbly webhook URL. Every lookup from the webhook above is sent here with event = lead_lookup.">
                 <Input id="lk-out" name="outboundUrl" defaultValue={outboundUrl ?? ""} placeholder="https://connect.pabbly.com/workflow/sendwebhookdata/…" />
+              </Field>
+              <Field label="Mentor teams" htmlFor="lk-teams" hint="When the Mentor sheet says a team (A, Team B, …) instead of a name, it's sent as this mentor's name. One per line, e.g. A = Anupa. Write “closed” for a team that must never get leads: its rows are skipped and the lead goes on to the Sub-mentor sheet.">
+                <Textarea id="lk-teams" name="teamNames" rows={7} defaultValue={cfg.teamNames} className="font-mono text-xs" />
               </Field>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Re-read sheets every (min)" htmlFor="lk-refresh">

@@ -58,12 +58,30 @@ describe("lead lookup: rules", () => {
     const m = readSheetRows(MENTOR_CSV, "mentor");
     const s = readSheetRows(SUB_CSV, "subMentor");
     const r = (lead: { email?: string; phone?: string }) => matchLead(m, s, lead);
-    expect(r({ email: "  ASHA.verma@example.com " })).toEqual({ leadType: "mentor", mentorName: "Anil Kapoor", subMentorName: null, matchedBy: "email" });
+    expect(r({ email: "  ASHA.verma@example.com " })).toEqual({ leadType: "mentor", mentorName: "Anil Kapoor", mentorTeam: null, subMentorName: null, matchedBy: "email" });
     expect(r({ phone: "098765-43210" })).toMatchObject({ leadType: "mentor", matchedBy: "phone" });
-    expect(r({ phone: "+91 70000 00002" })).toEqual({ leadType: "sub_mentor", mentorName: "Anil Kapoor", subMentorName: "Vikram Singh", matchedBy: "phone" });
-    expect(r({ email: "nobody@example.com", phone: "9111111111" })).toEqual({ leadType: "none", mentorName: null, subMentorName: null, matchedBy: null });
+    expect(r({ phone: "+91 70000 00002" })).toEqual({ leadType: "sub_mentor", mentorName: "Anil Kapoor", mentorTeam: null, subMentorName: "Vikram Singh", matchedBy: "phone" });
+    expect(r({ email: "nobody@example.com", phone: "9111111111" })).toEqual({ leadType: "none", mentorName: null, mentorTeam: null, subMentorName: null, matchedBy: null });
     // In both sheets: Mentor's lead, and the Sub-mentor sheet isn't checked.
-    expect(r({ email: "both@example.com" })).toEqual({ leadType: "mentor", mentorName: "Neha Rao", subMentorName: null, matchedBy: "email" });
+    expect(r({ email: "both@example.com" })).toEqual({ leadType: "mentor", mentorName: "Neha Rao", mentorTeam: null, subMentorName: null, matchedBy: "email" });
+  });
+
+  it("team letters in the Mentor sheet become names; a closed team (D) is never routed to", async () => {
+    const { matchLead, parseTeams, readSheetRows, teamCode, DEFAULT_TEAMS } = await import("@/lib/lookup");
+    expect(["A", "Team B", "team-c", " TEAM g ", "Anupa"].map(teamCode)).toEqual(["A", "B", "C", "G", null]);
+    const teams = parseTeams(DEFAULT_TEAMS);
+    expect([teams.get("A"), teams.get("D"), teams.get("G")]).toEqual(["Anupa", null, "Sweety"]);
+    const m = readSheetRows("Name,Mobile,Team\nX,9800000001,Team A\nY,9800000002,D\nZ,9800000003,F\nW,9800000004,Ravi\n", "mentor");
+    const s = readSheetRows("Phone,Sub Mentor Name,Mentor Name\n9800000002,Karan Shah,Team C\n", "subMentor");
+    const r = (phone: string) => matchLead(m, s, { phone }, teams);
+    expect(r("9800000001")).toMatchObject({ leadType: "mentor", mentorName: "Anupa", mentorTeam: "A" });
+    expect(r("9800000003")).toMatchObject({ leadType: "mentor", mentorName: "Shobhita", mentorTeam: "F" });
+    expect(r("9800000004")).toMatchObject({ leadType: "mentor", mentorName: "Ravi", mentorTeam: null }); // a name stays as it is
+    // Team D: skipped, so the Sub-mentor sheet decides (its Mentor Name "Team C" is decoded too).
+    expect(r("9800000002")).toMatchObject({ leadType: "sub_mentor", subMentorName: "Karan Shah", mentorName: "Jesal", mentorTeam: "C" });
+    expect(matchLead(m, [], { phone: "9800000002" }, teams).leadType).toBe("none");
+    // The list is editable: a renamed team takes effect.
+    expect(matchLead(m, s, { phone: "9800000001" }, parseTeams("A: Asha\nTeam D - closed")).mentorName).toBe("Asha");
   });
 
   it("API input: alternative names; no email and no phone is refused", async () => {
