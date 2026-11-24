@@ -2,6 +2,7 @@
 // sent to a secret inbound webhook, checked against each list's Google Sheet links (re-read every few
 // minutes, so edits are picked up; the last good copy is kept for outages) and uploaded files, and the
 // result is sent on to the outbound webhook.
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { decryptJson, encryptJson, newWebhookToken } from "@/lib/crypto";
 import { logger } from "@/lib/logger";
@@ -325,6 +326,69 @@ export async function autoLookupLead(leadId: string) {
   }
 }
 
+// ---------- Webhook history ----------
+
+const LOG_DAYS = 30;
+type LogEntry = {
+  status: "received" | "rejected" | "sent" | "failed";
+  test?: boolean;
+  lookupId?: string | null;
+  httpStatus?: number | null;
+  body?: unknown;
+  response?: string | null;
+  error?: string | null;
+  attempt?: number | null;
+  durationMs?: number | null;
+};
+
+/** A body as stored JSON: as it is when small, otherwise a note. */
+function keepable(body: unknown): Prisma.InputJsonValue | undefined {
+  if (body === undefined || body === null) return undefined;
+  const json = JSON.stringify(body);
+  return json.length <= 20_000 ? (JSON.parse(json) as Prisma.InputJsonValue) : { note: `Too large to keep (${json.length.toLocaleString("en-IN")} characters)` };
+}
+
+/** Adds a line to the webhook history (never throws). Now and then drops lines older than 30 days. */
+export async function logWebhook(e: LogEntry) {
+  try {
+    await prisma.lookupWebhookLog.create({
+      data: {
+        status: e.status,
+        direction: e.status === "received" || e.status === "rejected" ? "in" : "out",
+        test: Boolean(e.test),
+        lookupId: e.lookupId ?? null,
+        httpStatus: e.httpStatus ?? null,
+        body: keepable(e.body),
+        response: e.response?.slice(0, 1000) ?? null,
+        error: e.error?.slice(0, 500) ?? null,
+        attempt: e.attempt ?? null,
+        durationMs: e.durationMs ?? null,
+      },
+    });
+    if (Math.random() < 0.02) await prisma.lookupWebhookLog.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - LOG_DAYS * 86_400_000) } } });
+  } catch (err) {
+    logger.warn({ err }, "lookup webhook history: couldn't save a line");
+  }
+}
+
+export const LOG_FILTERS = ["all", "received", "rejected", "sent", "failed"] as const;
+export type LogFilter = (typeof LOG_FILTERS)[number];
+const LOG_PAGE = 50;
+
+/** One page of the webhook history, newest first, with counts for the filter tabs. */
+export async function webhookHistory(ctx: Ctx, filter: LogFilter = "all", page = 1) {
+  assertAdmin(ctx);
+  const where = filter === "all" ? {} : { status: filter };
+  const [rows, total, groups] = await Promise.all([
+    prisma.lookupWebhookLog.findMany({ where, orderBy: { createdAt: "desc" }, skip: (Math.max(1, page) - 1) * LOG_PAGE, take: LOG_PAGE }),
+    prisma.lookupWebhookLog.count({ where }),
+    prisma.lookupWebhookLog.groupBy({ by: ["status"], _count: { _all: true } }),
+  ]);
+  const counts = Object.fromEntries(groups.map((g) => [g.status, g._count._all])) as Partial<Record<LogFilter, number>>;
+  counts.all = groups.reduce((n, g) => n + g._count._all, 0);
+  return { rows, total, pages: Math.max(1, Math.ceil(total / LOG_PAGE)), counts };
+}
+
 /** Sends one saved lookup to the outbound webhook. Throws on failure so the queue retries. */
 export async function deliverLookup(lookupId: string) {
   const row = await prisma.leadLookup.findUnique({ where: { id: lookupId } });
@@ -334,9 +398,34 @@ export async function deliverLookup(lookupId: string) {
     await prisma.leadLookup.update({ where: { id: lookupId }, data: { webhookStatus: "off", webhookError: "No outbound webhook set" } });
     return;
   }
-  const res = await postJson(url, row.payload);
+  const attempt = (await prisma.lookupWebhookLog.count({ where: { lookupId, direction: "out" } })) + 1;
+  const res = await postJson(url, row.payload, { keepResponse: true });
+  await logWebhook({ status: res.ok ? "sent" : "failed", lookupId, httpStatus: res.status, body: row.payload, response: res.response, error: res.error, attempt, durationMs: res.durationMs });
   await prisma.leadLookup.update({ where: { id: lookupId }, data: { webhookStatus: res.ok ? "sent" : "failed", webhookError: res.error } });
   if (!res.ok) throw new Error(`Lookup webhook failed: ${res.error}`);
+}
+
+const TEST_RESULTS: Record<LeadType, LookupResult> = {
+  mentor: { leadType: "mentor", mentorName: "Anupa", mentorTeam: "A", subMentorName: null, matchedBy: "email" },
+  sub_mentor: { leadType: "sub_mentor", mentorName: "Jesal", mentorTeam: "C", subMentorName: "Test Sub-mentor", matchedBy: "phone" },
+  none: { leadType: "none", mentorName: null, mentorTeam: null, subMentorName: null, matchedBy: null },
+};
+
+/**
+ * Sends a sample result to the outbound webhook right now (not queued, not retried), so its fields can
+ * be mapped in Pabbly. Marked "test": true. Uses the URL typed in the form, or the saved one.
+ */
+export async function sendLookupTest(ctx: Ctx, leadType: LeadType, typedUrl?: string) {
+  assertAdmin(ctx);
+  const url = typedUrl?.trim() || outboundUrl(await config());
+  if (!url) throw new Error("Add your webhook URL in the settings first.");
+  const problem = webhookUrlProblem(url);
+  if (problem) throw new Error(problem);
+  const payload = { ...lookupPayload(TEST_RESULTS[leadType] ?? TEST_RESULTS.none, { name: "Test Lead", email: "test.lead@example.com", phone: "+91 90000 00000" }, "panel"), source: "test", test: true };
+  const res = await postJson(url, payload, { keepResponse: true });
+  await logWebhook({ status: res.ok ? "sent" : "failed", test: true, httpStatus: res.status, body: payload, response: res.response, error: res.error, durationMs: res.durationMs });
+  await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.test_send", target: leadType } });
+  return res;
 }
 
 // ---------- Lead lookup page (super admins) ----------

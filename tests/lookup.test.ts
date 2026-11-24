@@ -176,6 +176,39 @@ describe("lead lookup: global webhook in, your webhook out", () => {
     expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: body.lookup_id } })).webhookStatus).toBe("off");
   });
 
+  it("webhook history: received, rejected, sent and failed are logged; Send test posts a marked sample", async () => {
+    const { admin, token } = await setup();
+    const { deliverLookup, sendLookupTest, webhookHistory } = await import("@/lib/lookup");
+    const ok = await (await post(token, { name: "Sameer Khan", phone: "7000000002" })).json();
+    await post(token, { name: "No contact" }); // 422
+    await post("b".repeat(48), { email: "x@y.z" }); // wrong URL
+    await deliverLookup(ok.lookup_id); // sent
+    fakeNet({ mentor: MENTOR_CSV, sub: SUB_CSV }, 500);
+    const again = await (await post(token, { email: "asha.verma@example.com" })).json();
+    await expect(deliverLookup(again.lookup_id)).rejects.toThrow();
+    await expect(deliverLookup(again.lookup_id)).rejects.toThrow();
+
+    const h = await webhookHistory(admin);
+    expect(h.counts).toMatchObject({ all: 7, received: 2, rejected: 2, sent: 1, failed: 2 });
+    const received = h.rows.find((r) => r.status === "received" && r.lookupId === ok.lookup_id)!;
+    expect(received.body).toMatchObject({ name: "Sameer Khan", phone: "7000000002" });
+    expect(received.response).toContain("sub_mentor");
+    const failed = (await webhookHistory(admin, "failed")).rows;
+    expect(failed.map((r) => [r.httpStatus, r.attempt])).toEqual([[500, 2], [500, 1]]);
+    expect(failed[0].body).toMatchObject({ lead_type: "mentor", mentor_name: "Anil Kapoor" });
+    expect((await webhookHistory(admin, "rejected")).rows.map((r) => r.httpStatus).sort()).toEqual([401, 422]);
+    const wrong = (await webhookHistory(admin, "rejected")).rows.find((r) => r.httpStatus === 401)!;
+    expect(wrong.body).toBeNull();
+
+    fakeNet({ mentor: MENTOR_CSV, sub: SUB_CSV }, 200);
+    const t = await sendLookupTest(admin, "sub_mentor");
+    expect(t.ok).toBe(true);
+    expect(pabbly.at(-1)?.body).toMatchObject({ test: true, source: "test", lead_type: "sub_mentor", mentor_name: "Jesal", mentor_team: "C" });
+    const sent = (await webhookHistory(admin, "sent")).rows[0];
+    expect([sent.test, sent.httpStatus]).toEqual([true, 200]);
+    await expect(sendLookupTest(admin, "mentor", "http://localhost:5432/x")).rejects.toThrow();
+  });
+
   it("two Mentor Google Sheets and one Sub-mentor sheet: searched together, and edits in Google are picked up", async () => {
     const { admin, token } = await setup();
     const { addSheetLink, getLookupSetup, removeSheetLink, sheetStatus } = await import("@/lib/lookup");

@@ -170,10 +170,30 @@ export async function buildLeadPayload(leadId: string, event = "lead.created") {
 
 const TIMEOUT_MS = 10_000;
 
-export type SendResult = { ok: boolean; status: number | null; error: string | null; durationMs: number };
+export type SendResult = { ok: boolean; status: number | null; error: string | null; durationMs: number; response?: string | null };
+
+/** Reads at most `max` characters of a reply, then stops reading. */
+async function readStart(res: Response, max: number): Promise<string | null> {
+  const reader = res.body?.getReader();
+  if (!reader) return null;
+  let text = "";
+  const decoder = new TextDecoder();
+  try {
+    while (text.length < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    // A broken reply body: keep what was read.
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return text.slice(0, max) || null;
+}
 
 /** POSTs JSON to a checked public URL. Redirects are not followed (they could point anywhere). */
-export async function postJson(rawUrl: string, body: unknown): Promise<SendResult> {
+export async function postJson(rawUrl: string, body: unknown, opts: { keepResponse?: boolean } = {}): Promise<SendResult> {
   const started = Date.now();
   try {
     const url = await assertSafeWebhookUrl(rawUrl);
@@ -184,9 +204,10 @@ export async function postJson(rawUrl: string, body: unknown): Promise<SendResul
       redirect: "manual",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    await res.body?.cancel().catch(() => {});
+    // The start of the reply (e.g. Pabbly's {"status":"success"}), for the lookup history; otherwise not read.
+    const response = opts.keepResponse ? await readStart(res, 1000) : (await res.body?.cancel().catch(() => {}), null);
     const ok = res.status >= 200 && res.status < 300;
-    return { ok, status: res.status, error: ok ? null : `HTTP ${res.status}`, durationMs: Date.now() - started };
+    return { ok, status: res.status, error: ok ? null : `HTTP ${res.status}`, durationMs: Date.now() - started, response };
   } catch (err) {
     const msg = err instanceof Error ? (err.name === "TimeoutError" ? `No response within ${TIMEOUT_MS / 1000}s` : err.message) : "Send failed";
     return { ok: false, status: null, error: msg.slice(0, 300), durationMs: Date.now() - started };

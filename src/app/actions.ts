@@ -25,7 +25,7 @@ import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
 import { mergeColumn, renameColumn, setColumnHidden, unmergeField } from "@/lib/fieldManager";
 import { addNote, assignLeads, bulkTag, clearJunk, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
 import { recordError, setErrorResolved } from "@/lib/errors";
-import { addSheetLink, checkByHand, reloadSheets, removeSheetFile, removeSheetLink, resendLookup, rotateLookupToken, saveLookupConfig, uploadSheet } from "@/lib/lookup";
+import { addSheetLink, checkByHand, reloadSheets, removeSheetFile, removeSheetLink, resendLookup, rotateLookupToken, saveLookupConfig, sendLookupTest, uploadSheet } from "@/lib/lookup";
 import { listNotifications, markAllRead } from "@/lib/notifications";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -363,6 +363,21 @@ export async function addSheetLinkAction(_: ActionState, fd: FormData): Promise<
     const r = await addSheetLink(ctx, sheet, str(fd, "url"));
     revalidatePath("/lookup");
     return r.error ? { error: `Added, but it couldn't be read yet: ${r.error}` } : { ok: `Added: ${r.rows.toLocaleString("en-IN")} rows. It's re-read automatically.` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function sendLookupTestAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  const type = str(fd, "leadType");
+  const leadType = type === "mentor" || type === "sub_mentor" ? type : "none";
+  try {
+    const r = await sendLookupTest(ctx, leadType, str(fd, "url"));
+    revalidatePath("/lookup");
+    return r.ok
+      ? { ok: `Test sent: your webhook answered ${r.status}${r.response ? ` (${r.response.slice(0, 120)})` : ""}.` }
+      : { error: `Test failed: ${r.error}${r.response ? ` (${r.response.slice(0, 120)})` : ""}` };
   } catch (err) {
     return { error: errorMessage(err) };
   }

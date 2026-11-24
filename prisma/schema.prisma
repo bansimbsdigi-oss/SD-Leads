@@ -156,6 +156,30 @@ model LeadLookup {
   @@map("lead_lookups")
 }
 
+/// History of the lead lookup webhooks: every request received on the lookup webhook (accepted or
+/// rejected) and every attempt to send a result (or a test) to the outbound webhook. Kept 30 days.
+model LookupWebhookLog {
+  id         String   @id @default(cuid())
+  /// received | rejected (inbound) · sent | failed (outbound)
+  status     String
+  direction  String   // in | out
+  test       Boolean  @default(false)
+  lookupId   String?  @map("lookup_id")
+  httpStatus Int?     @map("http_status")
+  /// What came in, or what was sent.
+  body       Json?
+  /// The start of the other side's reply (outbound) or our reply (inbound).
+  response   String?
+  error      String?
+  attempt    Int?
+  durationMs Int?     @map("duration_ms")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@map("lookup_webhook_logs")
+}
+
 /// Errors seen by the app (server, background jobs, browsers), grouped by fingerprint.
 model ErrorLog {
   id          String    @id @default(cuid())

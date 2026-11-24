@@ -1,12 +1,13 @@
-import { ArrowDownToLine, ArrowUpFromLine, FileSpreadsheet, Search, Table2 } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, FileSpreadsheet, History, Search, Send, Table2 } from "lucide-react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { rotateLookupTokenAction, saveLookupConfigAction } from "@/app/actions";
+import { rotateLookupTokenAction, saveLookupConfigAction, sendLookupTestAction } from "@/app/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { CopyBox } from "@/components/CopyBox";
 import { LookupCheck, LookupSheets, ResendLookupButton } from "@/components/LeadLookupPanel";
-import { Badge, Button, Card, Empty, Field, Input, PageHeader, tableClass, Textarea, type Tone } from "@/components/ui";
+import { Badge, Button, buttonClass, Card, Empty, Field, Input, PageHeader, Select, tableClass, Textarea, type Tone } from "@/components/ui";
 import { formatDateTime } from "@/lib/leadColumns";
-import { getLookupSetup, recentLookups, sheetStatus } from "@/lib/lookup";
+import { getLookupSetup, LOG_FILTERS, recentLookups, sheetStatus, webhookHistory, type LogFilter } from "@/lib/lookup";
 import { LEAD_TYPE_LABEL, type LeadType } from "@/lib/lookupLabels";
 import { requireCtx } from "@/lib/session";
 
@@ -18,6 +19,24 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
   off: { label: "No webhook", tone: "slate" },
 };
 const SOURCE: Record<string, string> = { webhook: "Webhook", panel: "Checked by hand", lead: "New SD-Leads lead" };
+
+const LOG_TAB: Record<LogFilter, string> = { all: "All", received: "Received", rejected: "Rejected", sent: "Sent", failed: "Failed" };
+const LOG_STATUS: Record<string, { label: string; tone: Tone; dir: string }> = {
+  received: { label: "Received", tone: "blue", dir: "From Pabbly → lookup webhook" },
+  rejected: { label: "Rejected", tone: "amber", dir: "From Pabbly → lookup webhook" },
+  sent: { label: "Sent", tone: "green", dir: "To your webhook" },
+  failed: { label: "Failed", tone: "red", dir: "To your webhook" },
+};
+
+/** A one-line summary of a logged body: who, and what result. */
+function logSummary(body: unknown) {
+  if (!body || typeof body !== "object") return null;
+  const b = body as Record<string, unknown>;
+  const pick = (...k: string[]) => k.map((x) => b[x]).find((v) => (typeof v === "string" && v.trim()) || typeof v === "number");
+  return [pick("name", "full_name", "Name"), pick("email", "Email"), pick("phone", "mobile", "Phone", "phone_number", "whatsapp")].filter(Boolean).join(" · ") || null;
+}
+
+type SP = Promise<Record<string, string | string[] | undefined>>;
 
 const SAMPLE = `{
   "event": "lead_lookup",
@@ -36,10 +55,14 @@ const SAMPLE = `{
   "checked_at": "2026-11-23T17:31:11+05:30"
 }`;
 
-export default async function LeadLookupPage() {
+export default async function LeadLookupPage({ searchParams }: { searchParams: SP }) {
   const ctx = await requireCtx();
   if (ctx.role !== "SUPER_ADMIN") notFound();
-  const [{ cfg, outboundUrl }, lookups] = await Promise.all([getLookupSetup(ctx), recentLookups(ctx)]);
+  const sp = await searchParams;
+  const logFilter = (LOG_FILTERS as readonly string[]).includes(String(sp.log)) ? (sp.log as LogFilter) : "all";
+  const logPage = Math.max(1, Number(sp.logPage) || 1);
+  const [{ cfg, outboundUrl }, lookups, history] = await Promise.all([getLookupSetup(ctx), recentLookups(ctx), webhookHistory(ctx, logFilter, logPage)]);
+  const logHref = (f: LogFilter, p = 1) => `/lookup?log=${f}${p > 1 ? `&logPage=${p}` : ""}#history`;
   const sheets = sheetStatus(cfg);
   const inboundUrl = `${(process.env.INGEST_URL || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/api/lookup/${cfg.apiToken}`;
 
@@ -100,6 +123,63 @@ export default async function LeadLookupPage() {
               </div>
             )}
           </Card>
+
+          <Card flush title={<span id="history" className="flex scroll-mt-20 items-center gap-2"><History aria-hidden className="size-4 text-brand-700" /> Webhook history</span>} description="Everything received on your lookup webhook and everything sent to your webhook (including failures and tests). Kept for 30 days. Click a row to see the data.">
+            <div className="flex flex-wrap gap-1.5 border-b border-line px-4 py-3">
+              {LOG_FILTERS.map((f) => (
+                <Link key={f} href={logHref(f)} scroll={false} className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset ${f === logFilter ? "bg-brand-700 text-white ring-brand-700" : "text-ink-muted ring-line hover:bg-slate-100"}`}>
+                  {LOG_TAB[f]} <span className="tabular-nums opacity-75">{(history.counts[f] ?? 0).toLocaleString("en-IN")}</span>
+                </Link>
+              ))}
+            </div>
+            {history.rows.length === 0 ? (
+              <Empty icon={<History />} title="Nothing here yet">Requests from Pabbly and results sent to your webhook will show up here.</Empty>
+            ) : (
+              <ul className="divide-y divide-line">
+                {history.rows.map((h) => {
+                  const st = LOG_STATUS[h.status] ?? { label: h.status, tone: "slate" as Tone, dir: "" };
+                  const summary = logSummary(h.body);
+                  return (
+                    <li key={h.id}>
+                      <details className="group">
+                        <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm hover:bg-slate-50">
+                          <span className="w-36 shrink-0 whitespace-nowrap text-xs text-ink-muted">{formatDateTime(h.createdAt)}</span>
+                          <Badge tone={st.tone}>{st.label}</Badge>
+                          {h.test && <Badge tone="violet">Test</Badge>}
+                          <span className="text-xs text-ink-muted">{st.dir}{h.attempt && h.attempt > 1 ? ` · try ${h.attempt}` : ""}</span>
+                          <span className="min-w-0 flex-1 truncate">{summary ?? <span className="text-ink-muted">{h.error ?? "—"}</span>}</span>
+                          {h.httpStatus !== null && <span className={`font-mono text-xs ${h.httpStatus >= 200 && h.httpStatus < 300 ? "text-emerald-700" : "text-red-700"}`}>HTTP {h.httpStatus}</span>}
+                        </summary>
+                        <div className="space-y-2 bg-slate-50 px-4 pb-4 pt-1 text-xs">
+                          {h.error && <p className="text-red-700"><strong>Problem:</strong> {h.error}</p>}
+                          {h.durationMs !== null && <p className="text-ink-muted">Took {h.durationMs} ms</p>}
+                          <div className="grid gap-2 lg:grid-cols-2">
+                            <div>
+                              <p className="mb-1 font-medium">{h.direction === "in" ? "Data received" : "Data sent"}</p>
+                              <pre className="max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-[11px] leading-relaxed text-[#cfe3f5]">{h.body ? JSON.stringify(h.body, null, 2) : "(not kept)"}</pre>
+                            </div>
+                            <div>
+                              <p className="mb-1 font-medium">{h.direction === "in" ? "Result" : "Your webhook answered"}</p>
+                              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-[11px] leading-relaxed text-[#cfe3f5]">{h.response ?? (h.direction === "out" && !h.httpStatus ? "(no answer)" : "—")}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      </details>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {history.pages > 1 && (
+              <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-3 text-xs text-ink-muted">
+                <span>Page {logPage} of {history.pages} · {history.total.toLocaleString("en-IN")} entries</span>
+                <span className="flex gap-2">
+                  {logPage > 1 && <Link href={logHref(logFilter, logPage - 1)} scroll={false} className={buttonClass("secondary", "sm")}>Newer</Link>}
+                  {logPage < history.pages && <Link href={logHref(logFilter, logPage + 1)} scroll={false} className={buttonClass("secondary", "sm")}>Older</Link>}
+                </span>
+              </div>
+            )}
+          </Card>
         </div>
 
         <div className="space-y-6">
@@ -127,6 +207,22 @@ export default async function LeadLookupPage() {
                 </span>
               </label>
               <Button type="submit" className="w-full">Save settings</Button>
+            </ActionForm>
+          </Card>
+
+          <Card title={<span className="flex items-center gap-2"><Send aria-hidden className="size-4 text-brand-700" /> Send a test</span>} description="Sends a sample result to your webhook now, with “test”: true, so you can map the fields in Pabbly. It shows up in the webhook history.">
+            <ActionForm action={sendLookupTestAction} className="space-y-3">
+              <Field label="Result to send" htmlFor="lk-test-type">
+                <Select id="lk-test-type" name="leadType" defaultValue="mentor" className="w-full">
+                  <option value="mentor">Mentor&apos;s lead</option>
+                  <option value="sub_mentor">Sub-mentor&apos;s lead</option>
+                  <option value="none">None of the above</option>
+                </Select>
+              </Field>
+              <Field label="Webhook URL (optional)" htmlFor="lk-test-url" hint="Leave empty to use the saved one.">
+                <Input id="lk-test-url" name="url" placeholder={outboundUrl ? "The saved webhook" : "https://connect.pabbly.com/workflow/sendwebhookdata/…"} />
+              </Field>
+              <Button type="submit" variant="secondary" className="w-full"><Send aria-hidden /> Send test</Button>
             </ActionForm>
           </Card>
 
