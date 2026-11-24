@@ -63,7 +63,7 @@ export default async function LeadLookupPage() {
             </form>
           </Card>
 
-          <Card title={<span className="flex items-center gap-2"><FileSpreadsheet aria-hidden className="size-4 text-brand-700" /> 2. Sheets</span>} description={`Upload each sheet as CSV or Excel (.xlsx), or paste a Google Sheet link in the settings (read live, every ${cfg.refreshMinutes} min). Upload again whenever the list changes.`}>
+          <Card title={<span className="flex items-center gap-2"><FileSpreadsheet aria-hidden className="size-4 text-brand-700" /> 2. Sheets</span>} description="Add as many files as you have to each list, e.g. two Mentor sheets and one Sub-mentor sheet. All files of a list are searched together. A Google Sheet link (settings) can be added too.">
             <LookupSheets sheets={sheets} />
           </Card>
 

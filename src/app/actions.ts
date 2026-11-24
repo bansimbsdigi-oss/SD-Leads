@@ -25,7 +25,7 @@ import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
 import { mergeColumn, renameColumn, setColumnHidden, unmergeField } from "@/lib/fieldManager";
 import { addNote, assignLeads, bulkTag, clearJunk, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
 import { recordError, setErrorResolved } from "@/lib/errors";
-import { checkByHand, reloadSheets, resendLookup, rotateLookupToken, saveLookupConfig, uploadSheet } from "@/lib/lookup";
+import { checkByHand, reloadSheets, removeSheetFile, resendLookup, rotateLookupToken, saveLookupConfig, uploadSheet } from "@/lib/lookup";
 import { listNotifications, markAllRead } from "@/lib/notifications";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -360,15 +360,23 @@ export async function saveLookupConfigAction(_: ActionState, fd: FormData): Prom
 export async function uploadSheetAction(_: ActionState, fd: FormData): Promise<ActionState> {
   const ctx = await requireCtx();
   const sheet = str(fd, "sheet") === "subMentor" ? "subMentor" : "mentor";
+  const files = fd.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
+  if (!files.length) return { error: "Choose a file first." };
+  const done: string[] = [];
   try {
-    const file = fd.get("file");
-    if (!(file instanceof File)) return { error: "Choose a file first." };
-    const rows = await uploadSheet(ctx, sheet, file);
-    revalidatePath("/lookup");
-    return { ok: `${rows.toLocaleString("en-IN")} rows loaded.` };
+    for (const file of files) done.push(`${file.name}: ${(await uploadSheet(ctx, sheet, file)).toLocaleString("en-IN")} rows`);
   } catch (err) {
-    return { error: errorMessage(err) };
+    revalidatePath("/lookup");
+    return { error: [errorMessage(err), done.length ? `(Loaded: ${done.join(", ")})` : ""].join(" ").trim() };
   }
+  revalidatePath("/lookup");
+  return { ok: `Loaded ${done.join(", ")}.` };
+}
+
+export async function removeSheetFileAction(sheet: "mentor" | "subMentor", name: string) {
+  const ctx = await requireCtx();
+  await removeSheetFile(ctx, sheet, name);
+  revalidatePath("/lookup");
 }
 
 export async function reloadSheetsAction() {

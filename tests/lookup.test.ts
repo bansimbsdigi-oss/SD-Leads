@@ -154,17 +154,31 @@ describe("lead lookup: global webhook in, your webhook out", () => {
     expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: body.lookup_id } })).webhookStatus).toBe("off");
   });
 
-  it("uploaded CSV sheets are used instead of links, and kept when the link field is left empty", async () => {
-    const { admin, token } = await setup({ mentor: MENTOR_CSV, sub: SUB_CSV });
-    const { getLookupSetup, saveLookupConfig, sheetStatus, uploadSheet } = await import("@/lib/lookup");
-    const csv = "Email,Phone,Mentor Name\nupload@example.com,9822222222,Ravi Menon\n";
-    expect(await uploadSheet(admin, "mentor", new File([csv], "mentors.csv", { type: "text/csv" }))).toBe(1);
-    await saveLookupConfig(admin, { mentorSheetUrl: "", subMentorSheetUrl: SUB_URL, outboundUrl: "", refreshMinutes: 2, enabled: true });
-    const status = sheetStatus((await getLookupSetup(admin)).cfg)[0];
-    expect([status.fileName, status.url, status.rows]).toEqual(["mentors.csv", null, 1]);
-    const body = await (await post(token, { phone: "+91 98222 22222" })).json();
-    expect(body).toMatchObject({ lead_type: "mentor", mentor_name: "Ravi Menon" });
-    await expect(uploadSheet(admin, "mentor", new File(["Name,City\nA,B\n"], "bad.csv"))).rejects.toThrow(/Email or Phone/);
+  it("two Mentor files and one Sub-mentor file are searched together; a file can be removed or replaced", async () => {
+    const { admin, token } = await setup();
+    const { getLookupSetup, removeSheetFile, saveLookupConfig, sheetStatus, uploadSheet } = await import("@/lib/lookup");
+    // Files only (no links).
+    await saveLookupConfig(admin, { mentorSheetUrl: "", subMentorSheetUrl: "", outboundUrl: "", refreshMinutes: 2, enabled: true });
+    const file = (name: string, csv: string) => new File([csv], name, { type: "text/csv" });
+    await uploadSheet(admin, "mentor", file("mentors-a.csv", "Email,Phone,Mentor Name\na@example.com,9822222221,Ravi Menon\n"));
+    await uploadSheet(admin, "mentor", file("mentors-b.csv", "Mobile Number,Mentor Name\n9822222222,Sunita Rao\n9822222223,Sunita Rao\n"));
+    await uploadSheet(admin, "subMentor", file("subs.csv", "Phone,Sub Mentor Name,Mentor Name\n9833333333,Karan Shah,Ravi Menon\n9822222222,Should Not Win,X\n"));
+
+    const [m, sub] = sheetStatus((await getLookupSetup(admin)).cfg);
+    expect([m.files.map((f) => [f.name, f.rows]), m.rows]).toEqual([[["mentors-a.csv", 1], ["mentors-b.csv", 2]], 3]);
+    expect([sub.files.length, sub.rows]).toEqual([1, 2]);
+
+    const ask = async (body: object) => (await post(token, body)).json();
+    expect(await ask({ email: "A@example.com" })).toMatchObject({ lead_type: "mentor", mentor_name: "Ravi Menon" }); // first Mentor file
+    expect(await ask({ phone: "98222 22222" })).toMatchObject({ lead_type: "mentor", mentor_name: "Sunita Rao", sub_mentor_name: "" }); // second file; Sub-mentor not checked
+    expect(await ask({ phone: "9833333333" })).toMatchObject({ lead_type: "sub_mentor", sub_mentor_name: "Karan Shah", mentor_name: "Ravi Menon" });
+
+    // Same name replaces; removing a file stops its people matching.
+    await uploadSheet(admin, "mentor", file("mentors-b.csv", "Mobile Number,Mentor Name\n9822222229,New Person\n"));
+    expect(sheetStatus((await getLookupSetup(admin)).cfg)[0].files.map((f) => [f.name, f.rows])).toEqual([["mentors-a.csv", 1], ["mentors-b.csv", 1]]);
+    await removeSheetFile(admin, "mentor", "mentors-a.csv");
+    expect(await ask({ email: "a@example.com" })).toMatchObject({ lead_type: "none" });
+    await expect(uploadSheet(admin, "mentor", file("bad.csv", "Name,City\nA,B\n"))).rejects.toThrow(/Email or Phone/);
   });
 
   it("with \"check every new lead\" on, new SD-Leads leads are looked up and sent automatically", async () => {

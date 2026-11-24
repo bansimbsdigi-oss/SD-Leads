@@ -133,7 +133,9 @@ const FIELDS = {
   subMentor: { url: "subMentorSheetUrl", rows: "subMentorRows", readAt: "subMentorReadAt", error: "subMentorError" },
 } as const;
 
-const FILE = { mentor: "mentorFileName", subMentor: "subMentorFileName" } as const;
+const FILES = { mentor: "mentorFiles", subMentor: "subMentorFiles" } as const;
+type UploadedFile = { name: string; rows: SheetRow[]; uploadedAt: string };
+const filesOf = (cfg: Config, sheet: Sheet) => ((cfg[FILES[sheet]] as UploadedFile[] | null) ?? []);
 
 type Config = NonNullable<Awaited<ReturnType<typeof prisma.lookupConfig.findUnique>>>;
 
@@ -147,12 +149,19 @@ async function config(): Promise<Config> {
 
 const outboundUrl = (cfg: Config) => (cfg.outboundConfig ? decryptJson<{ url: string }>(cfg.outboundConfig).url : null);
 
-/** Re-reads a sheet when its copy is older than the refresh time (or `force`). Keeps the last good copy on failure. */
+/** All rows of a list: its uploaded files (in upload order), then its sheet link. */
 async function freshRows(cfg: Config, sheet: Sheet, force = false): Promise<{ rows: SheetRow[]; error: string | null; readAt: Date | null }> {
+  const fileRows = filesOf(cfg, sheet).flatMap((f) => f.rows);
+  const link = await linkRows(cfg, sheet, force);
+  return { ...link, rows: [...fileRows, ...link.rows] };
+}
+
+/** Re-reads a sheet link when its copy is older than the refresh time (or `force`). Keeps the last good copy on failure. */
+async function linkRows(cfg: Config, sheet: Sheet, force: boolean): Promise<{ rows: SheetRow[]; error: string | null; readAt: Date | null }> {
   const f = FIELDS[sheet];
   const url = cfg[f.url];
   const cached = (cfg[f.rows] as SheetRow[] | null) ?? [];
-  if (!url) return { rows: cfg[FILE[sheet]] ? cached : [], error: null, readAt: cfg[f.readAt] }; // an uploaded file, or nothing
+  if (!url) return { rows: [], error: null, readAt: null };
   const age = cfg[f.readAt] ? Date.now() - cfg[f.readAt]!.getTime() : Infinity;
   if (!force && age < cfg.refreshMinutes * 60_000 && !cfg[f.error]) return { rows: cached, error: null, readAt: cfg[f.readAt] };
   try {
@@ -211,7 +220,8 @@ export function lookupPayload(r: LookupResult, lead: { name?: string | null; ema
   };
 }
 
-const ready = (cfg: Config) => cfg.enabled && Boolean(cfg.mentorSheetUrl || cfg.subMentorSheetUrl);
+const ready = (cfg: Config) =>
+  cfg.enabled && Boolean(cfg.mentorSheetUrl || cfg.subMentorSheetUrl || filesOf(cfg, "mentor").length || filesOf(cfg, "subMentor").length);
 
 // ---------- Inbound webhook and checks by hand ----------
 
@@ -320,13 +330,9 @@ export async function saveLookupConfig(ctx: Ctx, input: { mentorSheetUrl: string
       refreshMinutes: Math.min(60, Math.max(1, Math.round(input.refreshMinutes || 2))),
       enabled: input.enabled,
       autoCheckLeads: Boolean(input.autoCheckLeads),
-      // A changed link starts from scratch; a new link replaces an uploaded file. A blank link keeps an upload.
-      ...(before.mentorSheetUrl !== mentor && (mentor || !before.mentorFileName)
-        ? { mentorRows: Prisma.DbNull, mentorReadAt: null, mentorError: null, mentorFileName: null }
-        : {}),
-      ...(before.subMentorSheetUrl !== sub && (sub || !before.subMentorFileName)
-        ? { subMentorRows: Prisma.DbNull, subMentorReadAt: null, subMentorError: null, subMentorFileName: null }
-        : {}),
+      // A changed link starts from scratch. Uploaded files are kept either way.
+      ...(before.mentorSheetUrl !== mentor ? { mentorRows: Prisma.DbNull, mentorReadAt: null, mentorError: null } : {}),
+      ...(before.subMentorSheetUrl !== sub ? { subMentorRows: Prisma.DbNull, subMentorReadAt: null, subMentorError: null } : {}),
     },
   });
   await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.settings", target: "global" } });
@@ -347,19 +353,22 @@ export async function reloadSheets(ctx: Ctx) {
   await Promise.all([freshRows(cfg, "mentor", true), freshRows(cfg, "subMentor", true)]);
 }
 
-/** One card per sheet: connected?, rows loaded, last read, or the problem. */
+/** One card per list: its uploaded files, its sheet link, total rows, or the problem. */
 export function sheetStatus(cfg: Config) {
   return (["mentor", "subMentor"] as const).map((sheet) => {
     const f = FIELDS[sheet];
-    const rows = (cfg[f.rows] as SheetRow[] | null) ?? null;
+    const files = filesOf(cfg, sheet).map((x) => ({ name: x.name, rows: x.rows.length, uploadedAt: x.uploadedAt }));
+    const linkRows = cfg[f.url] ? ((cfg[f.rows] as SheetRow[] | null)?.length ?? null) : null;
+    const total = files.reduce((n, x) => n + x.rows, 0) + (linkRows ?? 0);
     return {
       sheet,
-      label: sheet === "mentor" ? "Mentor sheet" : "Sub-mentor sheet",
+      label: sheet === "mentor" ? "Mentor" : "Sub-mentor",
       url: cfg[f.url] ?? null,
-      fileName: cfg[FILE[sheet]] ?? null,
-      rows: rows?.length ?? null,
+      linkRows,
+      files,
+      rows: files.length || cfg[f.url] ? total : null,
       readAt: cfg[f.readAt] ?? null,
-      error: cfg[f.error] ?? null,
+      error: cfg[f.url] ? cfg[f.error] ?? null : null,
     };
   });
 }
@@ -407,13 +416,20 @@ export async function uploadSheet(ctx: Ctx, sheet: Sheet, file: File) {
   } else {
     throw new Error("Old .xls files aren't supported. Save it as .xlsx or .csv.");
   }
-  if (!rows.length) throw new Error("No rows with an email or phone were found under the header.");
-  const f = FIELDS[sheet];
-  await config();
-  await prisma.lookupConfig.update({
-    where: { id: GLOBAL },
-    data: { [f.url]: null, [f.rows]: rows, [f.readAt]: new Date(), [f.error]: null, [FILE[sheet]]: name },
-  });
+  if (!rows.length) throw new Error(`${name}: no rows with an email or phone were found under the header.`);
+  // Adds the file to the list; a file with the same name replaces the old copy (upload again after edits).
+  const cfg = await config();
+  const files = [...filesOf(cfg, sheet).filter((x) => x.name !== name), { name, rows, uploadedAt: new Date().toISOString() }];
+  if (files.length > 20) throw new Error("A list can have up to 20 files. Remove one first.");
+  await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [FILES[sheet]]: files } });
   await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.upload", target: `${sheet}: ${name} (${rows.length} rows)` } });
   return rows.length;
+}
+
+/** Takes one uploaded file out of a list. */
+export async function removeSheetFile(ctx: Ctx, sheet: Sheet, name: string) {
+  assertAdmin(ctx);
+  const cfg = await config();
+  await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [FILES[sheet]]: filesOf(cfg, sheet).filter((x) => x.name !== name) } });
+  await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.remove_file", target: `${sheet}: ${name}` } });
 }
