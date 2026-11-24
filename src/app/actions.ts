@@ -25,7 +25,7 @@ import { hideColumn, saveHiddenColumns } from "@/lib/columnPrefs";
 import { mergeColumn, renameColumn, setColumnHidden, unmergeField } from "@/lib/fieldManager";
 import { addNote, assignLeads, bulkTag, clearJunk, editLeadDetails, setLeadStatus, setLeadTags } from "@/lib/leadEdit";
 import { recordError, setErrorResolved } from "@/lib/errors";
-import { checkByHand, reloadSheets, removeSheetFile, resendLookup, rotateLookupToken, saveLookupConfig, uploadSheet } from "@/lib/lookup";
+import { addSheetLink, checkByHand, reloadSheets, removeSheetFile, removeSheetLink, resendLookup, rotateLookupToken, saveLookupConfig, uploadSheet } from "@/lib/lookup";
 import { listNotifications, markAllRead } from "@/lib/notifications";
 import { parseLeadQuery } from "@/lib/leadQuery";
 import { can, ForbiddenError, NotFoundError } from "@/lib/tenant";
@@ -343,8 +343,6 @@ export async function saveLookupConfigAction(_: ActionState, fd: FormData): Prom
   const ctx = await requireCtx();
   try {
     await saveLookupConfig(ctx, {
-      mentorSheetUrl: str(fd, "mentorSheetUrl"),
-      subMentorSheetUrl: str(fd, "subMentorSheetUrl"),
       outboundUrl: str(fd, "outboundUrl"),
       refreshMinutes: Number(str(fd, "refreshMinutes")) || 2,
       enabled: fd.get("enabled") === "on",
@@ -354,7 +352,25 @@ export async function saveLookupConfigAction(_: ActionState, fd: FormData): Prom
     return { error: errorMessage(err) };
   }
   revalidatePath("/lookup");
-  return { ok: "Saved. Both sheets were read again." };
+  return { ok: "Saved." };
+}
+
+export async function addSheetLinkAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireCtx();
+  const sheet = str(fd, "sheet") === "subMentor" ? "subMentor" : "mentor";
+  try {
+    const r = await addSheetLink(ctx, sheet, str(fd, "url"));
+    revalidatePath("/lookup");
+    return r.error ? { error: `Added, but it couldn't be read yet: ${r.error}` } : { ok: `Added: ${r.rows.toLocaleString("en-IN")} rows. It's re-read automatically.` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function removeSheetLinkAction(sheet: "mentor" | "subMentor", url: string) {
+  const ctx = await requireCtx();
+  await removeSheetLink(ctx, sheet, url);
+  revalidatePath("/lookup");
 }
 
 export async function uploadSheetAction(_: ActionState, fd: FormData): Promise<ActionState> {

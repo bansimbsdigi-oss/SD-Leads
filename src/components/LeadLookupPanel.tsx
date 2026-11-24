@@ -3,7 +3,7 @@
 import { FileSpreadsheet, FileUp, Link2, RefreshCw, Search, Send, TriangleAlert, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { checkLeadByHandAction, reloadSheetsAction, removeSheetFileAction, resendLookupAction, uploadSheetAction } from "@/app/actions";
+import { addSheetLinkAction, checkLeadByHandAction, reloadSheetsAction, removeSheetFileAction, removeSheetLinkAction, resendLookupAction, uploadSheetAction } from "@/app/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { Badge, Button, Field, Input, type Tone } from "@/components/ui";
 
@@ -12,22 +12,34 @@ const TYPE_TONE: Record<string, Tone> = { mentor: "green", sub_mentor: "violet",
 type SheetCard = {
   sheet: "mentor" | "subMentor";
   label: string;
-  url: string | null;
-  linkRows: number | null;
+  links: { url: string; rows: number | null; readAt: string | null; error: string | null }[];
   files: { name: string; rows: number; uploadedAt: string }[];
   rows: number | null;
-  readAt: string | null;
   error: string | null;
 };
 
-/** One card per list (Mentor / Sub-mentor): its files and sheet link, add files, remove one, reload. */
+const ago = (iso: string | null) => {
+  if (!iso) return "not read yet";
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  return min < 1 ? "read just now" : min < 60 ? `read ${min} min ago` : `read ${Math.round(min / 60)} h ago`;
+};
+
+/** A short name for a sheet link: its tab number when it has one. */
+const linkName = (url: string, i: number) => {
+  const gid = /[#?&]gid=(\d+)/.exec(url)?.[1];
+  return `Google Sheet ${i + 1}${gid && gid !== "0" ? ` (tab ${gid})` : ""}`;
+};
+
+const rowClass = "flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs ring-1 ring-inset ring-line";
+
+/** One card per list (Mentor / Sub-mentor): its Google Sheet links and files; add or remove them; reload. */
 export function LookupSheets({ sheets }: { sheets: SheetCard[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const remove = (sheet: SheetCard["sheet"], name: string) => {
-    if (!confirm(`Remove ${name} from this list? Its people won't be matched any more.`)) return;
+  const run = (question: string, fn: () => Promise<void>) => {
+    if (!confirm(question)) return;
     startTransition(async () => {
-      await removeSheetFileAction(sheet, name);
+      await fn();
       router.refresh();
     });
   };
@@ -43,51 +55,63 @@ export function LookupSheets({ sheets }: { sheets: SheetCard[] }) {
             {s.rows !== null && <p className="mt-2 text-2xl font-semibold tabular-nums">{s.rows.toLocaleString("en-IN")} <span className="text-sm font-normal text-ink-muted">people in total</span></p>}
 
             <ul className="mt-3 space-y-1.5">
+              {s.links.map((l, i) => (
+                <li key={l.url}>
+                  <div className={rowClass}>
+                    <Link2 aria-hidden className="size-3.5 shrink-0 text-ink-muted" />
+                    <a href={l.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-medium hover:underline" title={l.url}>{linkName(l.url, i)}</a>
+                    <span className="shrink-0 tabular-nums text-ink-muted" title={ago(l.readAt)}>{l.rows === null ? "—" : `${l.rows.toLocaleString("en-IN")} rows`}</span>
+                    <button type="button" disabled={pending} onClick={() => run(`Remove ${linkName(l.url, i)} from this list? Its people won't be matched any more.`, () => removeSheetLinkAction(s.sheet, l.url))} aria-label={`Remove ${linkName(l.url, i)}`} className="rounded p-0.5 text-ink-muted hover:bg-slate-200 hover:text-red-700">
+                      <X aria-hidden className="size-3.5" />
+                    </button>
+                  </div>
+                  <p className={`mt-0.5 flex items-start gap-1 px-1 text-[11px] ${l.error ? "text-red-700" : "text-ink-muted"}`}>
+                    {l.error ? <><TriangleAlert aria-hidden className="mt-px size-3 shrink-0" /> {l.error}{l.rows ? " Using the last good copy." : ""}</> : <>Updates automatically · {ago(l.readAt)}</>}
+                  </p>
+                </li>
+              ))}
               {s.files.map((f) => (
-                <li key={f.name} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs ring-1 ring-inset ring-line">
+                <li key={f.name} className={rowClass}>
                   <FileSpreadsheet aria-hidden className="size-3.5 shrink-0 text-ink-muted" />
-                  <span className="min-w-0 flex-1 truncate font-medium" title={f.name}>{f.name}</span>
+                  <span className="min-w-0 flex-1 truncate font-medium" title={`${f.name} (uploaded file, doesn't update)`}>{f.name}</span>
                   <span className="shrink-0 tabular-nums text-ink-muted">{f.rows.toLocaleString("en-IN")} rows</span>
-                  <button type="button" disabled={pending} onClick={() => remove(s.sheet, f.name)} aria-label={`Remove ${f.name}`} className="rounded p-0.5 text-ink-muted hover:bg-slate-200 hover:text-red-700">
+                  <button type="button" disabled={pending} onClick={() => run(`Remove ${f.name} from this list? Its people won't be matched any more.`, () => removeSheetFileAction(s.sheet, f.name))} aria-label={`Remove ${f.name}`} className="rounded p-0.5 text-ink-muted hover:bg-slate-200 hover:text-red-700">
                     <X aria-hidden className="size-3.5" />
                   </button>
                 </li>
               ))}
-              {s.url && (
-                <li className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs ring-1 ring-inset ring-line">
-                  <Link2 aria-hidden className="size-3.5 shrink-0 text-ink-muted" />
-                  <span className="min-w-0 flex-1 truncate font-medium">Google Sheet link</span>
-                  <span className="shrink-0 tabular-nums text-ink-muted">{s.linkRows === null ? "not read" : `${s.linkRows.toLocaleString("en-IN")} rows`}</span>
-                </li>
-              )}
             </ul>
-            {s.error && (
-              <p className="mt-2 flex items-start gap-1.5 text-xs text-red-700">
-                <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-                <span>Google Sheet link: {s.error}{s.linkRows ? " Using the last good copy." : ""}</span>
-              </p>
-            )}
-            {s.rows === null && <p className="mt-2 text-xs text-ink-muted">Add one or more files below (you can pick several at once).</p>}
+            {s.rows === null && <p className="mt-2 text-xs text-ink-muted">Paste the link of each {s.label} Google Sheet below, one at a time.</p>}
 
-            <ActionForm action={uploadSheetAction} className="mt-3 space-y-2 border-t border-line pt-3" resetOnSuccess>
+            <ActionForm action={addSheetLinkAction} className="mt-3 space-y-2 border-t border-line pt-3" resetOnSuccess>
               <input type="hidden" name="sheet" value={s.sheet} />
-              <input
-                type="file"
-                name="file"
-                multiple
-                required
-                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                aria-label={`${s.label} files`}
-                className="block w-full text-xs text-ink-muted file:mr-2 file:rounded-md file:border-0 file:bg-slate-100 file:px-2.5 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-slate-200"
-              />
-              <Button type="submit" variant="secondary" size="sm" className="w-full"><FileUp aria-hidden /> Add {s.label} file(s)</Button>
-              <p className="text-[11px] text-ink-muted">CSV or Excel (.xlsx). Uploading a file with the same name replaces the old copy.</p>
+              <Input name="url" required aria-label={`${s.label} Google Sheet link`} placeholder="https://docs.google.com/spreadsheets/d/…" />
+              <Button type="submit" variant="secondary" size="sm" className="w-full"><Link2 aria-hidden /> Add {s.label} Google Sheet</Button>
+              <p className="text-[11px] text-ink-muted">Share it as “Anyone with the link can view”. For one tab of a sheet, copy the link while that tab is open. Re-read every few minutes, so new rows are picked up automatically.</p>
             </ActionForm>
+
+            <details className="mt-3 border-t border-line pt-3">
+              <summary className="cursor-pointer text-xs font-medium text-ink-muted hover:text-ink">Or upload a file instead (fixed copy, doesn&apos;t update)</summary>
+              <ActionForm action={uploadSheetAction} className="mt-2 space-y-2" resetOnSuccess>
+                <input type="hidden" name="sheet" value={s.sheet} />
+                <input
+                  type="file"
+                  name="file"
+                  multiple
+                  required
+                  accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  aria-label={`${s.label} files`}
+                  className="block w-full text-xs text-ink-muted file:mr-2 file:rounded-md file:border-0 file:bg-slate-100 file:px-2.5 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-slate-200"
+                />
+                <Button type="submit" variant="secondary" size="sm" className="w-full"><FileUp aria-hidden /> Add {s.label} file(s)</Button>
+                <p className="text-[11px] text-ink-muted">CSV or Excel (.xlsx). Uploading a file with the same name replaces the old copy.</p>
+              </ActionForm>
+            </details>
           </div>
         ))}
       </div>
       <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => startTransition(async () => { await reloadSheetsAction(); router.refresh(); })}>
-        <RefreshCw aria-hidden className={pending ? "animate-spin" : undefined} /> {pending ? "Reading…" : "Reload Google Sheet links"}
+        <RefreshCw aria-hidden className={pending ? "animate-spin" : undefined} /> {pending ? "Reading…" : "Read all Google Sheets now"}
       </Button>
     </div>
   );

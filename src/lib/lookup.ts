@@ -1,7 +1,7 @@
-// Lead lookup: is a lead in the Mentor sheet, the Sub-mentor sheet, or neither? One global setup: leads are
-// sent to a secret inbound webhook, checked against the two Google Sheets (read live, at most every few
-// minutes; the last good copy is kept for outages), and the result is sent on to the outbound webhook.
-import { Prisma } from "@prisma/client";
+// Lead lookup: is a lead in the Mentor list, the Sub-mentor list, or neither? One global setup: leads are
+// sent to a secret inbound webhook, checked against each list's Google Sheet links (re-read every few
+// minutes, so edits are picked up; the last good copy is kept for outages) and uploaded files, and the
+// result is sent on to the outbound webhook.
 import { prisma } from "@/lib/db";
 import { decryptJson, encryptJson, newWebhookToken } from "@/lib/crypto";
 import { logger } from "@/lib/logger";
@@ -128,10 +128,10 @@ async function downloadSheet(url: string): Promise<string> {
 // ---------- Settings and the cached copies ----------
 
 const GLOBAL = "global";
-const FIELDS = {
-  mentor: { url: "mentorSheetUrl", rows: "mentorRows", readAt: "mentorReadAt", error: "mentorError" },
-  subMentor: { url: "subMentorSheetUrl", rows: "subMentorRows", readAt: "subMentorReadAt", error: "subMentorError" },
-} as const;
+const LINKS = { mentor: "mentorLinks", subMentor: "subMentorLinks" } as const;
+type SheetLink = { url: string; rows: SheetRow[]; readAt: string | null; error: string | null };
+const linksOf = (cfg: Config, sheet: Sheet) => ((cfg[LINKS[sheet]] as SheetLink[] | null) ?? []);
+const MAX_LINKS = 10;
 
 const FILES = { mentor: "mentorFiles", subMentor: "subMentorFiles" } as const;
 type UploadedFile = { name: string; rows: SheetRow[]; uploadedAt: string };
@@ -149,32 +149,37 @@ async function config(): Promise<Config> {
 
 const outboundUrl = (cfg: Config) => (cfg.outboundConfig ? decryptJson<{ url: string }>(cfg.outboundConfig).url : null);
 
-/** All rows of a list: its uploaded files (in upload order), then its sheet link. */
-async function freshRows(cfg: Config, sheet: Sheet, force = false): Promise<{ rows: SheetRow[]; error: string | null; readAt: Date | null }> {
-  const fileRows = filesOf(cfg, sheet).flatMap((f) => f.rows);
-  const link = await linkRows(cfg, sheet, force);
-  return { ...link, rows: [...fileRows, ...link.rows] };
+/** All rows of a list: its Google Sheet links (in the order added), then its uploaded files. */
+async function freshRows(cfg: Config, sheet: Sheet, force = false): Promise<SheetRow[]> {
+  const links = await freshLinks(cfg, sheet, force);
+  return [...links.flatMap((l) => l.rows), ...filesOf(cfg, sheet).flatMap((f) => f.rows)];
 }
 
-/** Re-reads a sheet link when its copy is older than the refresh time (or `force`). Keeps the last good copy on failure. */
-async function linkRows(cfg: Config, sheet: Sheet, force: boolean): Promise<{ rows: SheetRow[]; error: string | null; readAt: Date | null }> {
-  const f = FIELDS[sheet];
-  const url = cfg[f.url];
-  const cached = (cfg[f.rows] as SheetRow[] | null) ?? [];
-  if (!url) return { rows: [], error: null, readAt: null };
-  const age = cfg[f.readAt] ? Date.now() - cfg[f.readAt]!.getTime() : Infinity;
-  if (!force && age < cfg.refreshMinutes * 60_000 && !cfg[f.error]) return { rows: cached, error: null, readAt: cfg[f.readAt] };
+/** Reads one link now. On failure the last good copy is kept, with the problem noted. */
+async function readLink(link: SheetLink, sheet: Sheet): Promise<SheetLink> {
   try {
-    const rows = readSheetRows(await downloadSheet(url), sheet);
-    const readAt = new Date();
-    await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [f.rows]: rows, [f.readAt]: readAt, [f.error]: null } });
-    return { rows, error: null, readAt };
+    return { ...link, rows: readSheetRows(await downloadSheet(link.url), sheet), readAt: new Date().toISOString(), error: null };
   } catch (err) {
     const error = err instanceof Error ? err.message.slice(0, 300) : "Couldn't read the sheet.";
-    await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [f.error]: error } });
     logger.warn({ sheet, error }, "lookup sheet read failed; using last good copy");
-    return { rows: cached, error, readAt: cfg[f.readAt] };
+    return { ...link, error };
   }
+}
+
+/**
+ * Re-reads a list's links whose copy is older than the refresh time (or all, with `force`), so edits in
+ * Google Sheets are picked up within a few minutes. Saved together, in one write.
+ */
+async function freshLinks(cfg: Config, sheet: Sheet, force: boolean): Promise<SheetLink[]> {
+  const links = linksOf(cfg, sheet);
+  const stale = (l: SheetLink) => force || l.error || !l.readAt || Date.now() - new Date(l.readAt).getTime() >= cfg.refreshMinutes * 60_000;
+  if (!links.some(stale)) return links;
+  const next = await Promise.all(links.map((l) => (stale(l) ? readLink(l, sheet) : l)));
+  // Written against the current list, so a link added or removed meanwhile isn't undone.
+  const now = linksOf(await config(), sheet);
+  const merged = now.map((l) => next.find((n) => n.url === l.url) ?? l);
+  await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [LINKS[sheet]]: merged } });
+  return merged;
 }
 
 function find(rows: SheetRow[], email: string | null, phone: string | null) {
@@ -221,7 +226,7 @@ export function lookupPayload(r: LookupResult, lead: { name?: string | null; ema
 }
 
 const ready = (cfg: Config) =>
-  cfg.enabled && Boolean(cfg.mentorSheetUrl || cfg.subMentorSheetUrl || filesOf(cfg, "mentor").length || filesOf(cfg, "subMentor").length);
+  cfg.enabled && (["mentor", "subMentor"] as const).some((s) => linksOf(cfg, s).length > 0 || filesOf(cfg, s).length > 0);
 
 // ---------- Inbound webhook and checks by hand ----------
 
@@ -252,9 +257,9 @@ export async function lookupTokenMatches(token: string) {
 /** Looks up a lead, saves it and (when `send` and an outbound webhook is set) queues it to be sent. */
 export async function lookupAndLog(input: { name: string | null; email: string | null; phone: string | null; clientId?: string; leadId?: string }, source: "webhook" | "panel" | "lead", send: boolean) {
   const cfg = await config();
-  if (!ready(cfg)) throw new Error(cfg.enabled ? "Lead lookup isn't set up yet: add the sheet links first." : "Lead lookup is switched off.");
+  if (!ready(cfg)) throw new Error(cfg.enabled ? "Lead lookup isn't set up yet: add the Mentor and Sub-mentor sheets first." : "Lead lookup is switched off.");
   const [m, s] = await Promise.all([freshRows(cfg, "mentor"), freshRows(cfg, "subMentor")]);
-  const r = matchLead(m.rows, s.rows, input);
+  const r = matchLead(m, s, input);
   const payload = lookupPayload(r, input, source);
   const hasOut = Boolean(cfg.outboundConfig);
   const row = await prisma.leadLookup.create({
@@ -310,33 +315,46 @@ export async function getLookupSetup(ctx: Ctx) {
   return { cfg, outboundUrl: outboundUrl(cfg) };
 }
 
-export async function saveLookupConfig(ctx: Ctx, input: { mentorSheetUrl: string; subMentorSheetUrl: string; outboundUrl: string; refreshMinutes: number; enabled: boolean; autoCheckLeads?: boolean }) {
+export async function saveLookupConfig(ctx: Ctx, input: { outboundUrl: string; refreshMinutes: number; enabled: boolean; autoCheckLeads?: boolean }) {
   assertAdmin(ctx);
-  const mentor = input.mentorSheetUrl.trim() || null;
-  const sub = input.subMentorSheetUrl.trim() || null;
-  for (const u of [mentor, sub]) if (u) sheetCsvUrl(u); // throws a friendly error for a wrong link
   const out = input.outboundUrl.trim();
   if (out) {
     const problem = webhookUrlProblem(out);
     if (problem) throw new Error(problem);
   }
-  const before = await config();
+  await config();
   await prisma.lookupConfig.update({
     where: { id: GLOBAL },
     data: {
-      mentorSheetUrl: mentor,
-      subMentorSheetUrl: sub,
       outboundConfig: out ? encryptJson({ url: out }) : null,
       refreshMinutes: Math.min(60, Math.max(1, Math.round(input.refreshMinutes || 2))),
       enabled: input.enabled,
       autoCheckLeads: Boolean(input.autoCheckLeads),
-      // A changed link starts from scratch. Uploaded files are kept either way.
-      ...(before.mentorSheetUrl !== mentor ? { mentorRows: Prisma.DbNull, mentorReadAt: null, mentorError: null } : {}),
-      ...(before.subMentorSheetUrl !== sub ? { subMentorRows: Prisma.DbNull, subMentorReadAt: null, subMentorError: null } : {}),
     },
   });
   await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.settings", target: "global" } });
-  await reloadSheets(ctx);
+}
+
+/** Adds a Google Sheet link to a list and reads it straight away. Returns its rows and any problem reading it. */
+export async function addSheetLink(ctx: Ctx, sheet: Sheet, raw: string) {
+  assertAdmin(ctx);
+  const url = raw.trim();
+  sheetCsvUrl(url); // throws a friendly error for a wrong link
+  const links = linksOf(await config(), sheet);
+  if (links.some((l) => sheetCsvUrl(l.url) === sheetCsvUrl(url))) throw new Error("That sheet is already in this list.");
+  if (links.length >= MAX_LINKS) throw new Error(`A list can have up to ${MAX_LINKS} links. Remove one first.`);
+  const link = await readLink({ url, rows: [], readAt: null, error: null }, sheet);
+  await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [LINKS[sheet]]: [...linksOf(await config(), sheet), link] } });
+  await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.add_link", target: `${sheet}: ${url.slice(0, 150)}` } });
+  return { rows: link.rows.length, error: link.error };
+}
+
+/** Takes one Google Sheet link out of a list. */
+export async function removeSheetLink(ctx: Ctx, sheet: Sheet, url: string) {
+  assertAdmin(ctx);
+  const cfg = await config();
+  await prisma.lookupConfig.update({ where: { id: GLOBAL }, data: { [LINKS[sheet]]: linksOf(cfg, sheet).filter((l) => l.url !== url) } });
+  await prisma.auditLog.create({ data: { actorId: ctx.userId, action: "lookup.remove_link", target: `${sheet}: ${url.slice(0, 150)}` } });
 }
 
 export async function rotateLookupToken(ctx: Ctx) {
@@ -353,22 +371,19 @@ export async function reloadSheets(ctx: Ctx) {
   await Promise.all([freshRows(cfg, "mentor", true), freshRows(cfg, "subMentor", true)]);
 }
 
-/** One card per list: its uploaded files, its sheet link, total rows, or the problem. */
+/** One card per list: its Google Sheet links and uploaded files, total rows, and any problem. */
 export function sheetStatus(cfg: Config) {
   return (["mentor", "subMentor"] as const).map((sheet) => {
-    const f = FIELDS[sheet];
+    const links = linksOf(cfg, sheet).map((l) => ({ url: l.url, rows: l.readAt ? l.rows.length : null, readAt: l.readAt, error: l.error }));
     const files = filesOf(cfg, sheet).map((x) => ({ name: x.name, rows: x.rows.length, uploadedAt: x.uploadedAt }));
-    const linkRows = cfg[f.url] ? ((cfg[f.rows] as SheetRow[] | null)?.length ?? null) : null;
-    const total = files.reduce((n, x) => n + x.rows, 0) + (linkRows ?? 0);
+    const total = links.reduce((n, l) => n + (l.rows ?? 0), 0) + files.reduce((n, x) => n + x.rows, 0);
     return {
       sheet,
       label: sheet === "mentor" ? "Mentor" : "Sub-mentor",
-      url: cfg[f.url] ?? null,
-      linkRows,
+      links,
       files,
-      rows: files.length || cfg[f.url] ? total : null,
-      readAt: cfg[f.readAt] ?? null,
-      error: cfg[f.url] ? cfg[f.error] ?? null : null,
+      rows: links.length || files.length ? total : null,
+      error: links.find((l) => l.error)?.error ?? null,
     };
   });
 }
@@ -397,7 +412,7 @@ export async function resendLookup(ctx: Ctx, lookupId: string) {
 
 const MAX_UPLOAD = 5 * 1024 * 1024;
 
-/** Uses an uploaded CSV or Excel file for a sheet (instead of a Google link). */
+/** Adds an uploaded CSV or Excel file to a list (a fixed copy; Google Sheet links stay up to date). */
 export async function uploadSheet(ctx: Ctx, sheet: Sheet, file: File) {
   assertAdmin(ctx);
   if (!file || file.size === 0) throw new Error("Choose a file first.");

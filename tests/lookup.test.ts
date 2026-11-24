@@ -83,8 +83,10 @@ describe("lead lookup: global webhook in, your webhook out", () => {
   async function setup(sheets: Sheets = { mentor: MENTOR_CSV, sub: SUB_CSV }, outboundUrl = "https://93.184.216.34/pabbly") {
     fakeNet(sheets);
     const admin = await makeUser("SUPER_ADMIN", null);
-    const { saveLookupConfig, getLookupSetup } = await import("@/lib/lookup");
-    await saveLookupConfig(admin, { mentorSheetUrl: MENTOR_URL, subMentorSheetUrl: SUB_URL, outboundUrl, refreshMinutes: 2, enabled: true });
+    const { addSheetLink, saveLookupConfig, getLookupSetup } = await import("@/lib/lookup");
+    await saveLookupConfig(admin, { outboundUrl, refreshMinutes: 2, enabled: true });
+    await addSheetLink(admin, "mentor", MENTOR_URL);
+    await addSheetLink(admin, "subMentor", SUB_URL);
     const { cfg } = await getLookupSetup(admin);
     return { admin, token: cfg.apiToken };
   }
@@ -142,23 +144,54 @@ describe("lead lookup: global webhook in, your webhook out", () => {
 
   it("only super admins manage it; a bad webhook URL or non-Google sheet is refused; no webhook = not sent", async () => {
     const { admin, token } = await setup(undefined, "");
-    const { saveLookupConfig } = await import("@/lib/lookup");
+    const { addSheetLink, saveLookupConfig } = await import("@/lib/lookup");
     const { client } = await makeClient("alpha");
     const clientAdmin = await makeUser("CLIENT_ADMIN", client.id);
-    const base = { mentorSheetUrl: MENTOR_URL, subMentorSheetUrl: SUB_URL, outboundUrl: "", refreshMinutes: 2, enabled: true };
+    const base = { outboundUrl: "", refreshMinutes: 2, enabled: true };
     await expect(saveLookupConfig(clientAdmin, base)).rejects.toThrow();
+    await expect(addSheetLink(clientAdmin, "mentor", MENTOR_URL)).rejects.toThrow();
     await expect(saveLookupConfig(admin, { ...base, outboundUrl: "http://localhost:5432/x" })).rejects.toThrow();
-    await expect(saveLookupConfig(admin, { ...base, mentorSheetUrl: "https://example.com/sheet" })).rejects.toThrow(/Google Sheets/);
+    await expect(addSheetLink(admin, "mentor", "https://example.com/sheet")).rejects.toThrow(/Google Sheets/);
+    await expect(addSheetLink(admin, "mentor", "https://docs.google.com/spreadsheets/d/MENTOR123/edit?gid=0")).rejects.toThrow(/already/);
     const body = await (await post(token, { email: "nobody@example.com" })).json();
     expect(body.lead_type).toBe("none");
     expect((await prisma.leadLookup.findUniqueOrThrow({ where: { id: body.lookup_id } })).webhookStatus).toBe("off");
   });
 
+  it("two Mentor Google Sheets and one Sub-mentor sheet: searched together, and edits in Google are picked up", async () => {
+    const { admin, token } = await setup();
+    const { addSheetLink, getLookupSetup, removeSheetLink, sheetStatus } = await import("@/lib/lookup");
+    const second = { csv: "Mentor Name,Phone\nMeera Iyer,9855555555\n" };
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) =>
+      String(url).includes("MENTORTWO") ? new Response(second.csv, { headers: { "content-type": "text/csv" } }) : base(url, init));
+    const TWO = "https://docs.google.com/spreadsheets/d/MENTORTWO/edit#gid=5";
+    expect(await addSheetLink(admin, "mentor", TWO)).toEqual({ rows: 1, error: null });
+    const [m] = sheetStatus((await getLookupSetup(admin)).cfg);
+    expect([m.links.map((l) => l.rows), m.rows]).toEqual([[3, 1], 4]);
+
+    const ask = async (body: object) => (await post(token, body)).json();
+    expect(await ask({ phone: "9855555555" })).toMatchObject({ lead_type: "mentor", mentor_name: "Meera Iyer" });
+    expect(await ask({ email: "asha.verma@example.com" })).toMatchObject({ lead_type: "mentor", mentor_name: "Anil Kapoor" });
+
+    // Someone is added in Google Sheets; once the copy is older than the refresh time it's read again.
+    second.csv += "Meera Iyer,9866666666\n";
+    expect(await ask({ phone: "9866666666" })).toMatchObject({ lead_type: "none" }); // copy still fresh
+    const cfg = (await getLookupSetup(admin)).cfg;
+    const old = new Date(Date.now() - 3 * 60_000).toISOString();
+    await prisma.lookupConfig.update({ where: { id: "global" }, data: { mentorLinks: (cfg.mentorLinks as { readAt: string }[]).map((l) => ({ ...l, readAt: old })) } });
+    expect(await ask({ phone: "9866666666" })).toMatchObject({ lead_type: "mentor", mentor_name: "Meera Iyer" });
+
+    await removeSheetLink(admin, "mentor", TWO);
+    expect(await ask({ phone: "9855555555" })).toMatchObject({ lead_type: "none" });
+  });
+
   it("two Mentor files and one Sub-mentor file are searched together; a file can be removed or replaced", async () => {
     const { admin, token } = await setup();
-    const { getLookupSetup, removeSheetFile, saveLookupConfig, sheetStatus, uploadSheet } = await import("@/lib/lookup");
+    const { getLookupSetup, removeSheetFile, removeSheetLink, sheetStatus, uploadSheet } = await import("@/lib/lookup");
     // Files only (no links).
-    await saveLookupConfig(admin, { mentorSheetUrl: "", subMentorSheetUrl: "", outboundUrl: "", refreshMinutes: 2, enabled: true });
+    await removeSheetLink(admin, "mentor", MENTOR_URL);
+    await removeSheetLink(admin, "subMentor", SUB_URL);
     const file = (name: string, csv: string) => new File([csv], name, { type: "text/csv" });
     await uploadSheet(admin, "mentor", file("mentors-a.csv", "Email,Phone,Mentor Name\na@example.com,9822222221,Ravi Menon\n"));
     await uploadSheet(admin, "mentor", file("mentors-b.csv", "Mobile Number,Mentor Name\n9822222222,Sunita Rao\n9822222223,Sunita Rao\n"));
@@ -184,7 +217,7 @@ describe("lead lookup: global webhook in, your webhook out", () => {
   it("with \"check every new lead\" on, new SD-Leads leads are looked up and sent automatically", async () => {
     const { admin } = await setup();
     const { saveLookupConfig } = await import("@/lib/lookup");
-    await saveLookupConfig(admin, { mentorSheetUrl: MENTOR_URL, subMentorSheetUrl: SUB_URL, outboundUrl: "https://93.184.216.34/pabbly", refreshMinutes: 2, enabled: true, autoCheckLeads: true });
+    await saveLookupConfig(admin, { outboundUrl: "https://93.184.216.34/pabbly", refreshMinutes: 2, enabled: true, autoCheckLeads: true });
     const { ingestLead } = await import("@/lib/ingest/service");
     const { ingestPayloadSchema } = await import("@/lib/ingest/schema");
     const { payload } = await import("./helpers");

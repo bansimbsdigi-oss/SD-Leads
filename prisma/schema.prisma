@@ -110,11 +110,12 @@ model User {
 model LookupConfig {
   id                String    @id @default("global")
   enabled           Boolean   @default(true)
-  mentorSheetUrl    String?   @map("mentor_sheet_url")
-  subMentorSheetUrl String?   @map("sub_mentor_sheet_url")
   refreshMinutes    Int       @default(2) @map("refresh_minutes")
-  /// Uploaded files for each list: [{ name, rows, uploadedAt }]. Several per list (e.g. two Mentor
-  /// sheets); their rows are used together with the sheet link's, files first.
+  /// Google Sheet links for each list: [{ url, rows, readAt, error }]. Several per list (e.g. two Mentor
+  /// sheets). Re-read every refreshMinutes; `rows` is the last good copy, so a Google outage doesn't stop lookups.
+  mentorLinks       Json      @default("[]") @map("mentor_links")
+  subMentorLinks    Json      @default("[]") @map("sub_mentor_links")
+  /// Uploaded files for each list: [{ name, rows, uploadedAt }]. Searched together with the links (links first).
   mentorFiles       Json      @default("[]") @map("mentor_files")
   subMentorFiles    Json      @default("[]") @map("sub_mentor_files")
   /// Also check every new lead that arrives in SD-Leads (any client) and send the result on.
@@ -123,13 +124,6 @@ model LookupConfig {
   apiToken          String    @unique @map("api_token")
   /// Where results are sent after each lookup (AES-256-GCM encrypted JSON { url }).
   outboundConfig    String?   @map("outbound_config")
-  /// Parsed rows of each sheet link, kept so a Google outage doesn't stop lookups.
-  mentorRows        Json?     @map("mentor_rows")
-  subMentorRows     Json?     @map("sub_mentor_rows")
-  mentorReadAt      DateTime? @map("mentor_read_at")
-  subMentorReadAt   DateTime? @map("sub_mentor_read_at")
-  mentorError       String?   @map("mentor_error")
-  subMentorError    String?   @map("sub_mentor_error")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@map("lookup_configs")

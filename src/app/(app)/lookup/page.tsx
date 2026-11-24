@@ -39,7 +39,7 @@ export default async function LeadLookupPage() {
   const ctx = await requireCtx();
   if (ctx.role !== "SUPER_ADMIN") notFound();
   const [{ cfg, outboundUrl }, lookups] = await Promise.all([getLookupSetup(ctx), recentLookups(ctx)]);
-  const sheets = sheetStatus(cfg).map((s) => ({ ...s, readAt: s.readAt?.toISOString() ?? null }));
+  const sheets = sheetStatus(cfg);
   const inboundUrl = `${(process.env.INGEST_URL || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/api/lookup/${cfg.apiToken}`;
 
   return (
@@ -63,7 +63,7 @@ export default async function LeadLookupPage() {
             </form>
           </Card>
 
-          <Card title={<span className="flex items-center gap-2"><FileSpreadsheet aria-hidden className="size-4 text-brand-700" /> 2. Sheets</span>} description="Add as many files as you have to each list, e.g. two Mentor sheets and one Sub-mentor sheet. All files of a list are searched together. A Google Sheet link (settings) can be added too.">
+          <Card title={<span className="flex items-center gap-2"><FileSpreadsheet aria-hidden className="size-4 text-brand-700" /> 2. Sheets</span>} description="Add each Google Sheet to its list, e.g. two Mentor sheets and one Sub-mentor sheet. All sheets of a list are searched together, and they are re-read automatically, so changes in Google Sheets are picked up within a few minutes.">
             <LookupSheets sheets={sheets} />
           </Card>
 
@@ -102,14 +102,8 @@ export default async function LeadLookupPage() {
         </div>
 
         <div className="space-y-6">
-          <Card title="Settings" description="Share each sheet as “Anyone with the link can view” (or publish to the web as CSV), then paste its link.">
+          <Card title="Settings">
             <ActionForm action={saveLookupConfigAction} className="space-y-4">
-              <Field label="Mentor sheet link (optional)" htmlFor="lk-mentor" hint="Instead of uploading. Needs Email and/or Phone, and Mentor Name. Leave empty to keep an uploaded file.">
-                <Input id="lk-mentor" name="mentorSheetUrl" defaultValue={cfg.mentorSheetUrl ?? ""} placeholder="https://docs.google.com/spreadsheets/d/…" />
-              </Field>
-              <Field label="Sub-mentor sheet link (optional)" htmlFor="lk-sub" hint="Instead of uploading. Needs Email and/or Phone, Sub Mentor Name, and optionally Mentor Name.">
-                <Input id="lk-sub" name="subMentorSheetUrl" defaultValue={cfg.subMentorSheetUrl ?? ""} placeholder="https://docs.google.com/spreadsheets/d/…" />
-              </Field>
               <Field label="3. Your webhook (results are sent here)" htmlFor="lk-out" hint="E.g. your Pabbly webhook URL. Every lookup from the webhook above is sent here with event = lead_lookup.">
                 <Input id="lk-out" name="outboundUrl" defaultValue={outboundUrl ?? ""} placeholder="https://connect.pabbly.com/workflow/sendwebhookdata/…" />
               </Field>
@@ -128,7 +122,7 @@ export default async function LeadLookupPage() {
                   <span className="block text-xs text-ink-muted">Leads from all clients&apos; landing pages and webhooks are looked up and sent to your webhook automatically, with no Pabbly step.</span>
                 </span>
               </label>
-              <Button type="submit" className="w-full">Save and read sheets</Button>
+              <Button type="submit" className="w-full">Save settings</Button>
             </ActionForm>
           </Card>
 
