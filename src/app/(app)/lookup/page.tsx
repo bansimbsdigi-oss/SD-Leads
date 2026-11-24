@@ -210,8 +210,12 @@ export default async function LeadLookupPage({ searchParams }: { searchParams: S
             </ActionForm>
           </Card>
 
-          <Card title={<span className="flex items-center gap-2"><Send aria-hidden className="size-4 text-brand-700" /> Send a test</span>} description="Sends a sample result to your webhook now, with “test”: true, so you can map the fields in Pabbly. It shows up in the webhook history.">
+          <Card title={<span className="flex items-center gap-2"><Send aria-hidden className="size-4 text-brand-700" /> Send a test</span>} description="Sends a sample result to your saved webhook now, with “test”: true, so you can map the fields in Pabbly. It shows up in the webhook history.">
             <ActionForm action={sendLookupTestAction} className="space-y-3">
+              <p className="truncate rounded-lg bg-slate-50 px-3 py-2 text-xs ring-1 ring-inset ring-line" title={outboundUrl ?? undefined}>
+                <span className="text-ink-muted">Sends to: </span>
+                {outboundUrl ? <span className="font-mono">{outboundUrl.replace(/^https?:\/\//, "").slice(0, 48)}…</span> : <span className="text-red-700">no webhook saved yet. Add it in Settings above.</span>}
+              </p>
               <Field label="Result to send" htmlFor="lk-test-type">
                 <Select id="lk-test-type" name="leadType" defaultValue="mentor" className="w-full">
                   <option value="mentor">Mentor&apos;s lead</option>
@@ -219,10 +223,7 @@ export default async function LeadLookupPage({ searchParams }: { searchParams: S
                   <option value="none">None of the above</option>
                 </Select>
               </Field>
-              <Field label="Webhook URL (optional)" htmlFor="lk-test-url" hint="Leave empty to use the saved one.">
-                <Input id="lk-test-url" name="url" placeholder={outboundUrl ? "The saved webhook" : "https://connect.pabbly.com/workflow/sendwebhookdata/…"} />
-              </Field>
-              <Button type="submit" variant="secondary" className="w-full"><Send aria-hidden /> Send test</Button>
+              <Button type="submit" variant="secondary" className="w-full" disabled={!outboundUrl}><Send aria-hidden /> Send test</Button>
             </ActionForm>
           </Card>
 

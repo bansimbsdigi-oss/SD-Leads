@@ -206,7 +206,8 @@ describe("lead lookup: global webhook in, your webhook out", () => {
     expect(pabbly.at(-1)?.body).toMatchObject({ test: true, source: "test", lead_type: "sub_mentor", mentor_name: "Jesal", mentor_team: "C" });
     const sent = (await webhookHistory(admin, "sent")).rows[0];
     expect([sent.test, sent.httpStatus]).toEqual([true, 200]);
-    await expect(sendLookupTest(admin, "mentor", "http://localhost:5432/x")).rejects.toThrow();
+    await prisma.lookupConfig.update({ where: { id: "global" }, data: { outboundConfig: null } });
+    await expect(sendLookupTest(admin, "mentor")).rejects.toThrow(/Save your webhook/);
   });
 
   it("two Mentor Google Sheets and one Sub-mentor sheet: searched together, and edits in Google are picked up", async () => {

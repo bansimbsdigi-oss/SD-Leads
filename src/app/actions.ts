@@ -373,7 +373,7 @@ export async function sendLookupTestAction(_: ActionState, fd: FormData): Promis
   const type = str(fd, "leadType");
   const leadType = type === "mentor" || type === "sub_mentor" ? type : "none";
   try {
-    const r = await sendLookupTest(ctx, leadType, str(fd, "url"));
+    const r = await sendLookupTest(ctx, leadType);
     revalidatePath("/lookup");
     return r.ok
       ? { ok: `Test sent: your webhook answered ${r.status}${r.response ? ` (${r.response.slice(0, 120)})` : ""}.` }

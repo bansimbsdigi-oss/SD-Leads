@@ -412,15 +412,13 @@ const TEST_RESULTS: Record<LeadType, LookupResult> = {
 };
 
 /**
- * Sends a sample result to the outbound webhook right now (not queued, not retried), so its fields can
- * be mapped in Pabbly. Marked "test": true. Uses the URL typed in the form, or the saved one.
+ * Sends a sample result to the saved outbound webhook right now (not queued, not retried), so its fields
+ * can be mapped in Pabbly. Marked "test": true.
  */
-export async function sendLookupTest(ctx: Ctx, leadType: LeadType, typedUrl?: string) {
+export async function sendLookupTest(ctx: Ctx, leadType: LeadType) {
   assertAdmin(ctx);
-  const url = typedUrl?.trim() || outboundUrl(await config());
-  if (!url) throw new Error("Add your webhook URL in the settings first.");
-  const problem = webhookUrlProblem(url);
-  if (problem) throw new Error(problem);
+  const url = outboundUrl(await config());
+  if (!url) throw new Error("Save your webhook URL in Settings first.");
   const payload = { ...lookupPayload(TEST_RESULTS[leadType] ?? TEST_RESULTS.none, { name: "Test Lead", email: "test.lead@example.com", phone: "+91 90000 00000" }, "panel"), source: "test", test: true };
   const res = await postJson(url, payload, { keepResponse: true });
   await logWebhook({ status: res.ok ? "sent" : "failed", test: true, httpStatus: res.status, body: payload, response: res.response, error: res.error, durationMs: res.durationMs });
